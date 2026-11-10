@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { Page } from '@/components/shell';
-import { removeFiles, uploadFile, useData } from '@/components/data';
+import { rpc, uploadFile, useData } from '@/components/data';
 import { Area, DateIn, Err, FileLink, Foot, num, orNull, Select, Txt } from '@/components/forms';
 import { Badge, Card, Check, Kv, Lines, Modal, Seg, Table, useUI, type Col, type Tone } from '@/components/ui';
 import { supabase } from '@/lib/supabase/client';
@@ -73,8 +73,9 @@ function MeetingView({ id }: { id: string }) {
     const v = votes.find((x) => x.id === vid);
     if (!v) return;
     const req = v.request_id ? calc.request(v.request_id) : null;
-    if (!(await ui.confirm({ title: 'Delete Vote', body: <>Delete the vote on {v.item}?{req ? ` Request ${req.id} keeps its status (${req.status}); change it on Team Requests if the vote is being redone.` : ''}</>, ok: 'Delete', danger: true }))) return;
-    await run(() => supabase().from('meeting_votes').delete().eq('id', vid), 'Vote deleted');
+    const why = await ui.ask({ title: 'Archive Vote', body: <>Archive the vote on {v.item}?{req ? ` Request ${req.id} keeps its status (${req.status}).` : ''}</>, ok: 'Archive', danger: true });
+    if (!why) return;
+    await run(() => rpc('archive_record', { p_table: 'meeting_votes', p_id: vid, p_reason: why }), 'Vote archived');
   };
   return (
     <Modal wide title={m.title} foot={<>
@@ -149,16 +150,15 @@ function MeetingForm({ id }: { id?: string }) {
     };
     const ok = await run(() => (old ? supabase().from('meetings').update(row).eq('id', old.id) : supabase().from('meetings').insert(row)), old ? 'Meeting saved' : 'Meeting added');
     setBusy(false);
-    if (ok === false) { await removeFiles([agenda.file ? a.path : null, minutes.file ? mi.path : null]); return; }
-    const gone = [old?.agenda_path !== a.path ? old?.agenda_path : null, old?.minutes_path !== mi.path ? old?.minutes_path : null];
-    await removeFiles(gone);
+    if (ok === false) return;
     ui.close();
   };
   const del = async () => {
     if (!old) return;
-    if (!(await ui.confirm({ title: 'Delete Meeting', body: <>Delete {old.title}{votes ? ` and its ${votes} votes` : ''}? Uploaded agenda and minutes files are removed.{votes ? ' Team requests voted on here keep their status.' : ''}</>, ok: 'Delete', danger: true }))) return;
-    const ok = await run(() => supabase().from('meetings').delete().eq('id', old.id), 'Meeting deleted');
-    if (ok !== false) { await removeFiles([old.agenda_path, old.minutes_path]); ui.close(); ui.close(); }
+    const why = await ui.ask({ title: 'Archive Meeting', body: <>Archive {old.title}?{votes ? ` Its ${votes} votes stay on record; team requests voted on here keep their status.` : ''} Agenda and minutes files are kept.</>, ok: 'Archive', danger: true });
+    if (!why) return;
+    const ok = await run(() => rpc('archive_record', { p_table: 'meetings', p_id: old.id, p_reason: why }), 'Meeting archived');
+    if (ok !== false) { ui.close(); ui.close(); }
   };
   const togglePresent = (mid: string, v: boolean) => set({ present: v ? Array.from(new Set([...f.present, mid])) : f.present.filter((x) => x !== mid) });
   const docField = (d: DocState, setD: (x: DocState) => void, path: string | null | undefined, name: string | null | undefined) => (
@@ -263,8 +263,9 @@ function MemberForm({ id }: { id?: string }) {
   };
   const del = async () => {
     if (!old) return;
-    if (!(await ui.confirm({ title: 'Delete Member', body: <>Delete {old.name}? Past votes keep their tallies. To keep their history readable, untick Votes instead.</>, ok: 'Delete', danger: true }))) return;
-    const ok = await run(() => supabase().from('board_members').delete().eq('id', old.id), 'Member deleted');
+    const why = await ui.ask({ title: 'Archive Member', body: <>Archive {old.name}? Past votes keep their tallies. To keep them on the board list but not voting, untick Votes instead.</>, ok: 'Archive', danger: true });
+    if (!why) return;
+    const ok = await run(() => rpc('archive_record', { p_table: 'board_members', p_id: old.id, p_reason: why }), 'Member archived');
     if (ok !== false) ui.close();
   };
   return (

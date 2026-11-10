@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { Page } from '@/components/shell';
-import { useData } from '@/components/data';
+import { rpc, useData } from '@/components/data';
 import { Amount, Area, DateIn, Err, Foot, FundSelect, num, orNull, Select, Txt } from '@/components/forms';
 import { Badge, Card, Check, Kv, Lines, Modal, Pills, Seg, Table, useUI, type Col, type Tone } from '@/components/ui';
 import { supabase } from '@/lib/supabase/client';
@@ -65,7 +65,7 @@ function DonorForm({ id }: { id: string }) {
   const [f, setF] = useState(() => ({ name: d?.name || '', type: d?.type || 'Individual', giving: d?.giving || 'One-Time', channel: d?.channel || 'Zeffy', since: d?.since || '', anonymous: !!d?.anonymous, public: !!d?.public, grant_id: d?.grant_id || '', notes: d?.notes || '' }));
   const [err, setErr] = useState<string | null>(null);
   const set = (p: Partial<typeof f>) => setF((x) => ({ ...x, ...p }));
-  if (!d) return <Modal title="Donor"><div className="full empty">This donor was deleted.</div></Modal>;
+  if (!d) return <Modal title="Donor"><div className="full empty">This donor was archived.</div></Modal>;
   const t = calc.donorTotals(id);
 
   const save = async () => {
@@ -75,17 +75,22 @@ function DonorForm({ id }: { id: string }) {
     }).eq('id', id), 'Donor saved');
     if (ok !== false) ui.close();
   };
-  const thankAll = () => run(() => supabase().from('donations').update({ thanked: true }).eq('donor_id', id).eq('thanked', false), 'Marked thanked');
-  const toggleThanked = (gid: string, v: boolean) => run(() => supabase().from('donations').update({ thanked: v }).eq('id', gid));
+  const thankAll = () => run(() => rpc('gift_set_thanked', { p_ids: t.rows.filter((x) => !x.thanked).map((x) => x.id), p_thanked: true }), 'Marked thanked');
+  const toggleThanked = (gid: string, v: boolean) => run(() => rpc('gift_set_thanked', { p_ids: [gid], p_thanked: v }));
+  // A gift is never deleted: its money is reversed in the ledger and the gift is archived.
   const delGift = async (gid: string) => {
     const g = db.donations.find((x) => x.id === gid);
-    if (!g || !(await ui.confirm({ title: 'Delete Gift', body: <>Delete the {money(g.amount)} gift on {date(g.date)}? Its ledger entry is deleted too.</>, ok: 'Delete', danger: true }))) return;
-    await run(() => supabase().from('donations').delete().eq('id', gid), 'Gift deleted · totals updated');
+    if (!g) return;
+    const why = await ui.ask({ title: 'Remove Gift', body: <>Take the {money(g.amount)} gift on {date(g.date)} off this donor? Its money is reversed in the ledger; both entries stay in the books.</>, ok: 'Remove Gift', danger: true });
+    if (!why) return;
+    await run(() => rpc('gift_archive', { p_id: gid, p_reason: why }), 'Gift removed · totals updated');
   };
   const del = async () => {
     const n = t.rows.length;
-    if (!(await ui.confirm({ title: 'Delete Donor', body: <>Delete {d.name}{n ? <> and their {n} gifts ({money(sum(t.rows, (x) => x.amount))})? The gifts come out of the ledger too.</> : '?'}</>, ok: 'Delete', danger: true }))) return;
-    const ok = await run(() => supabase().from('donors').delete().eq('id', id), 'Donor deleted');
+    if (n) { setErr(`${d.name} has ${n} gifts (${money(sum(t.rows, (x) => x.amount))}). Remove those first; the donor is then archived.`); return; }
+    const why = await ui.ask({ title: 'Archive Donor', body: <>Archive {d.name}?</>, ok: 'Archive', danger: true });
+    if (!why) return;
+    const ok = await run(() => rpc('archive_record', { p_table: 'donors', p_id: id, p_reason: why }), 'Donor archived');
     if (ok !== false) ui.close();
   };
 

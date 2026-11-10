@@ -2,10 +2,9 @@
 // Monthly Reconciliation: the bank statement for a month, its lines matched to portal records, the workbook SOP
 // (bank ending balance = book balance + outstanding checks and Zelle − Zeffy payouts in transit), and the lock.
 import { useRef, useState } from 'react';
-import { openFile, uploadFile, useData } from '@/components/data';
+import { openFile, rpc, uploadFile, useData } from '@/components/data';
 import { Badge, Modal, Table, useUI, type Col } from '@/components/ui';
 import { Tip } from '@/components/tips';
-import { supabase } from '@/lib/supabase/client';
 import { date, monthName, sd } from '@/lib/format';
 import {
   bankAmount, bankLinesFromCsv, candidates, isMatched, matchPatch, monthEnd, monthStart, prevMonth, reconcileDue, suggestAll,
@@ -25,13 +24,19 @@ export function defaultMonth(statements: BankStatement[], today: string): string
 
 async function ensureStatement(month: string, existing: BankStatement | undefined): Promise<{ id: string } | { error: string }> {
   if (existing) return { id: existing.id };
-  const { data, error } = await supabase().from('bank_statements').insert({ month }).select('id').single();
+  const { data, error } = await rpc('bank_statement_add', { p_month: month });
   if (error || !data) return { error: error?.message || 'Could not create the statement' };
-  return { id: String(data.id) };
+  return { id: String(data) };
+}
+
+/** A bank line's match, through bank_line_match. */
+function saveMatch(id: string, m: Match | null) {
+  const p = matchPatch(m);
+  return rpc('bank_line_match', { p_id: id, p_ledger_id: p.matched_ledger_id, p_payout_date: p.matched_payout_date });
 }
 
 export function ReconcilePanel({ month, setMonth }: { month: string; setMonth: (m: string) => void }) {
-  const { db, calc, run } = useData();
+  const { db, calc, run, isTreasurer } = useData();
   const ui = useUI();
   const st = db.bank_statements.find((s) => s.month === month);
   const locked = !!st?.locked_at;
@@ -49,19 +54,25 @@ export function ReconcilePanel({ month, setMonth }: { month: string; setMonth: (
     if (locked || bank == null || (st && st.ending_balance === bank)) return;
     const s = await ensureStatement(month, st);
     if ('error' in s) { ui.toast(s.error, true); return; }
-    await run(() => supabase().from('bank_statements').update({ ending_balance: bank }).eq('id', s.id));
+    await run(() => rpc('bank_statement_set', { p_id: s.id, p: { ending_balance: bank } }));
   };
   const lock = async () => {
     if (!ok || bank == null) return;
     const yes = await ui.confirm({
       title: 'Mark ' + mon(month) + ' Reconciled',
-      body: <>The books match the bank at {cash(bank)}. Marking {monthName(month)} reconciled locks it: no ledger entry dated in {mon(month)} can be added, changed or removed after this, and there is no unlock. A later fix goes in as a correction dated in an open month.</>,
+      body: <>The books match the bank at {cash(bank)}. Marking {monthName(month)} reconciled locks it: no ledger entry, bank line or statement for {mon(month)} can be added, changed or removed after this. A later fix goes in as a correction dated in an open month. Only the Treasurer can unlock a month, with a reason.</>,
       ok: 'Mark Reconciled',
     });
     if (!yes) return;
     const s = await ensureStatement(month, st);
     if ('error' in s) { ui.toast(s.error, true); return; }
-    await run(() => supabase().rpc('lock_bank_month', { p_statement_id: s.id, p_ending: bank, p_difference: rec.difference }), monthName(month) + ' reconciled');
+    await run(() => rpc('lock_bank_month', { p_statement_id: s.id, p_ending: bank, p_difference: rec.difference }), monthName(month) + ' reconciled');
+  };
+  const unlock = async () => {
+    if (!st || !locked) return;
+    const why = await ui.ask({ title: 'Unlock ' + monthName(month), body: <>Unlocking lets entries, bank lines and the statement for {mon(month)} change again. The reason is kept on the statement.</>, ok: 'Unlock Month', danger: true });
+    if (!why) return;
+    await run(() => rpc('unlock_bank_month', { p_statement_id: st.id, p_reason: why }), monthName(month) + ' unlocked');
   };
 
   const outLines = rec.outstanding.slice(0, 8).map((l) => `${l.pay_method === 'Check' && l.pay_ref ? 'Check #' + l.pay_ref.replace(/^#/, '') : l.pay_method || 'Payment'} to ${l.party || 'payee'}, ${sd(l.date)}, ${cash(l.amount)}`);
@@ -113,7 +124,8 @@ export function ReconcilePanel({ month, setMonth }: { month: string; setMonth: (
             : rec.difference === 0 ? <Badge tone="grn">$0.00 · Balanced</Badge>
               : <Hint r tip="Look for uncleared items, unassigned Zeffy gifts, or a deposit not yet logged"><Badge tone="red">{cash(rec.difference)} · Off</Badge></Hint>}</div>
       </div>
-      {locked ? null : (
+      {st?.unlock_reason && !locked ? <div className="muted" style={{ margin: '6px 0' }}>Unlocked {st.unlocked_at ? sd(st.unlocked_at.slice(0, 10)) : ''}{st.unlocked_by ? ' by ' + st.unlocked_by : ''}: {st.unlock_reason}</div> : null}
+      {locked ? (isTreasurer ? <div className="bal-acts"><button className="btn" onClick={unlock}>Unlock {mon(month)}</button></div> : null) : (
         <div className="bal-acts">
           <Hint r tip={ok ? '' : 'Enter the bank balance; the difference must be $0.00'}>
             <button className="btn pri" onClick={lock} disabled={!ok}>Mark {mon(month)} Reconciled</button>
@@ -154,13 +166,13 @@ function StatementModal({ month }: { month: string }) {
   };
 
   const setMatch = (b: BankLine, m: Match | null, ok?: string) =>
-    run(() => supabase().from('bank_lines').update(matchPatch(m)).eq('id', b.id), ok);
+    run(() => saveMatch(b.id, m), ok);
 
   const confirmAll = async () => {
     setBusy(true);
     await run(async () => {
       for (const [id, m] of sugg) {
-        const { error } = await supabase().from('bank_lines').update(matchPatch(m)).eq('id', id);
+        const { error } = await saveMatch(id, m);
         if (error) return { error };
       }
       return { error: null };
@@ -183,9 +195,9 @@ function StatementModal({ month }: { month: string }) {
       const have = new Set(db.bank_lines.filter((b) => b.statement_id === s.id).map(key));
       const fresh = inMonth.filter((l) => !have.has(key(l)));
       const res = await run(async () => {
-        const a = await supabase().from('bank_statements').update({ file_path: up.path, file_name: up.name }).eq('id', s.id);
+        const a = await rpc('bank_statement_set', { p_id: s.id, p: { file_path: up.path, file_name: up.name } });
         if (a.error) return a;
-        if (fresh.length) return supabase().from('bank_lines').insert(fresh.map((l) => ({ ...l, statement_id: s.id })));
+        if (fresh.length) return rpc('bank_lines_add', { p_statement_id: s.id, p_rows: fresh });
         return { error: null };
       });
       if (res !== false) {
@@ -203,13 +215,13 @@ function StatementModal({ month }: { month: string }) {
     if (monthStart(add.date) !== month) { ui.toast('That date is not in ' + monthName(month) + '.', true); return; }
     const s = await ensureStatement(month, st);
     if ('error' in s) { ui.toast(s.error, true); return; }
-    const r = await run(() => supabase().from('bank_lines').insert({ statement_id: s.id, date: add.date, description: add.description.trim() || null, amount }), 'Bank line added');
+    const r = await run(() => rpc('bank_lines_add', { p_statement_id: s.id, p_rows: [{ date: add.date, description: add.description.trim() || null, amount }] }), 'Bank line added');
     if (r !== false) setAdd({ date: '', description: '', amount: '' });
   };
 
   const removeLine = async (b: BankLine) => {
-    const yes = await ui.confirm({ title: 'Remove Bank Line', body: <>Remove the {cash(b.amount)} line of {date(b.date)} from this statement?</>, ok: 'Remove', danger: true });
-    if (yes) await run(() => supabase().from('bank_lines').delete().eq('id', b.id), 'Bank line removed');
+    const why = await ui.ask({ title: 'Remove Bank Line', body: <>Take the {cash(b.amount)} line of {date(b.date)} off this statement? It stays on record as removed.</>, ok: 'Remove', danger: true });
+    if (why) await run(() => rpc('bank_line_archive', { p_id: b.id, p_reason: why }), 'Bank line removed');
   };
 
   const cols: Col<BankLine>[] = [

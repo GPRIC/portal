@@ -1,13 +1,12 @@
 'use client';
 import { useState, type ReactNode } from 'react';
 import { Page } from '@/components/shell';
-import { removeFiles, uploadFile, useData } from '@/components/data';
+import { rpc, uploadFile, useData } from '@/components/data';
 import { Amount, Area, DateIn, Err, FileLink, Foot, FundSelect, num, orNull, Select, str, Txt } from '@/components/forms';
 import { Badge, Card, Check, Kv, Lines, Modal, Pills, Seg, St, Steps, Table, useUI, Warnings, type Col, type Tone } from '@/components/ui';
 import { Tip } from '@/components/tips';
-import { supabase } from '@/lib/supabase/client';
 import { date, money, round2, sd, sum } from '@/lib/format';
-import { PAY_METHODS, PAY_TO, REQUEST_CATEGORIES, REQUEST_STATUSES, REQUEST_TYPES, type PayMethod, type RequestType, type Team, type TeamRequest } from '@/lib/types';
+import { PAY_METHODS, PAY_TO, REQUEST_CATEGORIES, REQUEST_TYPES, type PayMethod, type RequestType, type Team, type TeamRequest } from '@/lib/types';
 import type { Calc } from '@/lib/calc';
 
 /** How a team's money reaches it (the team record, not a request). */
@@ -136,14 +135,14 @@ function stepsFor(calc: Calc, r: TeamRequest): Parameters<typeof Steps>[0]['list
 }
 
 function RequestView({ id }: { id: string }) {
-  const { calc, run, me } = useData();
+  const { calc, run, me, canPay } = useData();
   const ui = useUI();
   const r = calc.request(id);
   const [rc, setRc] = useState({ vendor: '', amount: '', date: calc.today });
   const [file, setFile] = useState<File | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  if (!r) return <Modal title="Team Request"><div className="full empty">This request was deleted.</div></Modal>;
+  if (!r) return <Modal title="Team Request"><div className="full empty">This request was archived.</div></Modal>;
   const t = calc.team(r.team_id);
   const receipts = calc.receiptsFor(r.id);
   const openReceipts = calc.isOpenReceipts(r);
@@ -159,16 +158,17 @@ function RequestView({ id }: { id: string }) {
       if ('error' in up) { setBusy(false); setErr('Upload failed: ' + up.error); return; }
       path = up.path; name = up.name;
     }
-    const ok = await run(() => supabase().rpc('add_request_receipt', { p_request_id: r.id, p_vendor: orNull(rc.vendor), p_amount: a, p_date: rc.date || calc.today, p_file_name: name, p_file_path: path, p_by: me }), 'Receipt added');
+    const ok = await run(() => rpc('add_request_receipt', { p_request_id: r.id, p_vendor: orNull(rc.vendor), p_amount: a, p_date: rc.date || calc.today, p_file_name: name, p_file_path: path, p_by: me }), 'Receipt added');
     setBusy(false);
-    if (ok === false) { await removeFiles([path]); return; }
+    if (ok === false) return;
     setRc({ vendor: '', amount: '', date: calc.today }); setFile(null);
   };
   const delReceipt = async (rid: string) => {
     const x = receipts.find((y) => y.id === rid);
-    if (!x || !(await ui.confirm({ title: 'Delete Receipt', body: <>Delete the {money(x.amount)} receipt{x.vendor ? ' from ' + x.vendor : ''}?</>, ok: 'Delete', danger: true }))) return;
-    const ok = await run(() => supabase().from('receipts').delete().eq('id', rid), 'Receipt deleted');
-    if (ok !== false) await removeFiles([x.file_path]);
+    if (!x) return;
+    const why = await ui.ask({ title: 'Remove Receipt', body: <>Take the {money(x.amount)} receipt{x.vendor ? ' from ' + x.vendor : ''} off this request? The file is kept.</>, ok: 'Remove', danger: true });
+    if (!why) return;
+    await run(() => rpc('receipt_archive', { p_id: rid, p_reason: why }), 'Receipt removed');
   };
   const complete = async () => {
     const left = calc.outstanding(r);
@@ -178,23 +178,25 @@ function RequestView({ id }: { id: string }) {
       ok: 'Close Request',
     });
     if (!yes) return;
-    await run(() => supabase().rpc('complete_request_receipts', { p_request_id: r.id, p_date: calc.today }), 'Request closed');
+    await run(() => rpc('complete_request_receipts', { p_request_id: r.id, p_date: calc.today }), 'Request closed');
   };
+  // Only a draft or declined request is archived; anything approved or paid stays on record.
+  const canArchive = r.status === 'Draft' || r.status === 'Declined';
   const del = async () => {
-    const paid = calc.db.ledger.filter((l) => l.request_id === r.id).length;
-    if (!(await ui.confirm({ title: 'Delete Request', body: <>Delete {r.id}, {forText(r)}? Its {receipts.length} receipts are deleted.{paid ? ` Its ${paid} ledger entries stay; delete them on the Ledger if the payment did not happen.` : ''}</>, ok: 'Delete', danger: true }))) return;
-    const ok = await run(() => supabase().from('team_requests').delete().eq('id', r.id), 'Request deleted');
-    if (ok !== false) { await removeFiles([...receipts.map((x) => x.file_path), r.receipt_path]); ui.close(); }
+    const why = await ui.ask({ title: 'Archive Request', body: <>Archive {r.id}, {forText(r)}? It stays on record.</>, ok: 'Archive', danger: true });
+    if (!why) return;
+    const ok = await run(() => rpc('archive_record', { p_table: 'team_requests', p_id: r.id, p_reason: why }), 'Request archived');
+    if (ok !== false) ui.close();
   };
 
   let act = null;
   if (calc.needsVote(r)) act = <button className="btn pri" onClick={() => ui.open(<ApproveForm id={r.id} />)}>Review Approval</button>;
-  else if (r.status === 'Approved') act = <button className="btn pri" onClick={() => ui.open(<PayForm id={r.id} />)}>Mark Paid</button>;
-  else if (openReceipts) act = <button className="btn pri" onClick={complete}>Receipts Complete</button>;
+  else if (r.status === 'Approved' && canPay) act = <button className="btn pri" onClick={() => ui.open(<PayForm id={r.id} />)}>Mark Paid</button>;
+  else if (openReceipts && canPay) act = <button className="btn pri" onClick={complete}>Receipts Complete</button>;
 
   return (
     <Modal wide title={r.id + ' · ' + forText(r)} foot={<>
-      <span className="btnrow"><button className="btn dan" onClick={del}>Delete</button><button className="btn" onClick={() => ui.open(<RequestForm id={r.id} />)}>Edit</button></span>
+      <span className="btnrow">{canArchive ? <button className="btn dan" onClick={del}>Archive</button> : null}<button className="btn" onClick={() => ui.open(<RequestForm id={r.id} />)}>Edit</button></span>
       <span className="btnrow"><button className="btn" onClick={ui.close}>Close</button>{act}</span>
     </>}>
       <Kv k="Type"><TypeBadge r={r} /></Kv>
@@ -231,7 +233,7 @@ function RequestView({ id }: { id: string }) {
                   <td>{date(x.date)}</td><td>{x.vendor || '—'}</td><td className="num">{money(x.amount, true)}</td>
                   <td>{x.file_path ? <FileLink path={x.file_path} name={x.file_name} /> : <span className="muted">{x.file_name || 'No file'}</span>}</td>
                   <td>{x.uploaded_by || '—'}</td>
-                  <td><button className="btn sm" onClick={() => delReceipt(x.id)}>Delete</button></td>
+                  <td>{r.status !== 'Closed' ? <button className="btn sm" onClick={() => delReceipt(x.id)}>Remove</button> : null}</td>
                 </tr>
               ))}
               {openReceipts ? (
@@ -259,7 +261,7 @@ function ApproveForm({ id }: { id: string }) {
   const r = calc.request(id);
   const [reason, setReason] = useState('');
   const [err, setErr] = useState<string | null>(null);
-  if (!r) return <Modal title="Approve Request"><div className="full empty">This request was deleted.</div></Modal>;
+  if (!r) return <Modal title="Approve Request"><div className="full empty">This request was archived.</div></Modal>;
   const t = calc.team(r.team_id);
   const s = calc.db.settings;
   const got = calc.approvalsFor(r.id), n = calc.needed(r);
@@ -267,15 +269,16 @@ function ApproveForm({ id }: { id: string }) {
   const bal = calc.fundBalance(t?.fund_id), after = round2(bal - r.amount);
   const late = calc.teamBlocked(r.team_id);
   const approve = async () => {
-    const res = await run(() => supabase().rpc('approve_request', { p_request_id: r.id }));
+    const res = await run(() => rpc('approve_request', { p_request_id: r.id }));
     if (res === false) return;
-    const o = res as { approvals: number; needed: number; status: string };
-    ui.toast(o.status === 'Approved' ? 'Approved · ready to pay' : 'Approval ' + o.approvals + ' of ' + o.needed + ' recorded');
+    const o = res as { approvals: number; needed: number; status: string; warnings?: string[] };
     ui.close();
+    if (o.warnings?.length) await ui.confirm({ title: o.status === 'Approved' ? 'Approved, With A Warning' : 'Approval Recorded, With A Warning', body: <>{o.warnings.map((w, i) => <div key={i}>{w}</div>)}</>, ok: 'OK' });
+    else ui.toast(o.status === 'Approved' ? 'Approved · ready to pay' : 'Approval ' + o.approvals + ' of ' + o.needed + ' recorded');
   };
   const decline = async () => {
     if (!reason.trim()) { setErr('Give the team a reason for declining.'); return; }
-    const ok = await run(() => supabase().rpc('decline_request', { p_request_id: r.id, p_reason: reason.trim() }), 'Declined · the team sees the reason');
+    const ok = await run(() => rpc('decline_request', { p_request_id: r.id, p_reason: reason.trim() }), 'Declined · the team sees the reason');
     if (ok !== false) ui.close();
   };
   return (
@@ -296,7 +299,7 @@ function ApproveForm({ id }: { id: string }) {
         <Kv k="Needed By">{r.needed_by ? date(r.needed_by) : ''}</Kv>
         <Kv k="Pays To">{r.pay_to}</Kv>
       </>}
-      <Kv k="Team Balance">{money(bal) + ' now · ' + money(after) + ' after'}{after < 0 ? <> <span title="Approving takes this team below zero. A warning only."><Badge tone="red">Below Zero</Badge></span></> : null}</Kv>
+      <Kv k="Team Balance">{money(bal) + ' now · ' + money(after) + ' after'}{after < 0 ? <> <span title="Approving warns; paying it will be blocked unless the Treasurer overrides."><Badge tone="red">Below Zero</Badge></span></> : null}</Kv>
       {late.length ? <div className="full sev red">{t?.short} has overdue receipts on {late.map((x) => x.id).join(', ')}.</div> : null}
       <Kv k="Approvals">
         <span className="appr">
@@ -314,17 +317,23 @@ function ApproveForm({ id }: { id: string }) {
 
 /** Records how a request was paid and writes its ledger row (mark_request_paid). */
 function PayForm({ id }: { id: string }) {
-  const { calc, run } = useData();
+  const { calc, run, isTreasurer } = useData();
   const ui = useUI();
   const r = calc.request(id);
   const [method, setMethod] = useState<PayMethod>(r && isR(r) ? 'Zelle' : 'Check');
   const [when, setWhen] = useState(calc.today);
   const [ref, setRef] = useState('');
-  if (!r) return <Modal title="Mark Paid"><div className="full empty">This request was deleted.</div></Modal>;
+  if (!r) return <Modal title="Mark Paid"><div className="full empty">This request was archived.</div></Modal>;
   const t = calc.team(r.team_id);
   const w = t?.fund_id ? calc.spendWarnings(t.fund_id, r.amount, 'Robotics Teams') : ['This team has no fund. Set one under Teams first.'];
   const save = async () => {
-    const ok = await run(() => supabase().rpc('mark_request_paid', { p_request_id: r.id, p_date: when || calc.today, p_method: method, p_ref: orNull(ref) }),
+    let override: string | null = null;
+    if (w.length && t?.fund_id) {
+      if (!isTreasurer) { ui.toast('Blocked: ' + w.join(' ') + ' Only the Treasurer can override.', true); return; }
+      override = await ui.ask({ title: 'Override A Money Rule', body: <>{w.map((x, i) => <div key={i}>{x}</div>)}</>, ok: 'Override And Pay', label: 'Why this is allowed' });
+      if (!override) return;
+    }
+    const ok = await run(() => rpc('mark_request_paid', { p_request_id: r.id, p_date: when || calc.today, p_method: method, p_ref: orNull(ref), p_override: override }),
       isR(r) ? 'Paid · ledger row written' : 'Paid · receipts due in ' + calc.receiptDays + ' days · ledger row written');
     if (ok !== false) ui.close();
   };
@@ -338,16 +347,17 @@ function PayForm({ id }: { id: string }) {
       <Kv k="Date Paid"><DateIn value={when} onChange={setWhen} /></Kv>
       <Kv k={check ? 'Check Number' : 'Confirmation Number'}><Txt value={ref} onChange={setRef} placeholder={check ? 'e.g. 110' : method === 'Zelle' ? 'Zelle confirmation code' : 'Reference from the bank'} /></Kv>
       <div className="full muted">Saving writes an Out row to the Ledger: {money(-r.amount)} from {calc.fundName(t?.fund_id) || 'the team fund'}.{isR(r) ? '' : ' It also starts the ' + calc.receiptDays + '-day receipt clock.'}</div>
-      <Warnings list={w} />
+      <Warnings list={w} blocks />
     </Modal>
   );
 }
 
 /** The dollar threshold and how many approvals each side of it needs (settings). */
 function RulesForm() {
-  const { db, run } = useData();
+  const { db, run, isTreasurer } = useData();
   const ui = useUI();
   const s = db.settings;
+  const [bk, setBk] = useState(s.bookkeeper_can_approve !== false);
   const [t, setT] = useState(str(s.approval_threshold));
   const [under, setUnder] = useState(String(s.approvals_under) as '1' | '2');
   const [over, setOver] = useState(String(s.approvals_over) as '1' | '2' | '3');
@@ -355,26 +365,28 @@ function RulesForm() {
   const amt = num(t);
   const save = async () => {
     if (!(amt >= 0)) { setErr('Enter the threshold in dollars.'); return; }
-    const ok = await run(() => supabase().from('settings').update({ approval_threshold: amt, approvals_under: +under, approvals_over: +over }).eq('id', 1), 'Approval rules saved');
+    const ok = await run(() => rpc('settings_save_rules', { p_threshold: amt, p_under: +under, p_over: +over, p_receipt_days: null, p_bookkeeper_can_approve: bk }), 'Approval rules saved');
     if (ok !== false) ui.close();
   };
   const ap = (n: string) => n + (n === '1' ? ' approval' : ' approvals');
   return (
-    <Modal title="Approval Rules" foot={<Foot onSave={save} />}>
+    <Modal title="Approval Rules" foot={<Foot onSave={isTreasurer ? save : undefined} />}>
+      {!isTreasurer ? <div className="full muted">Only the Treasurer changes the approval rules.</div> : null}
       <Kv k="Threshold"><Amount value={t} onChange={setT} placeholder="500.00" /></Kv>
       <Kv k="Up To Threshold"><Seg value={under} options={[['1', '1 Approval'], ['2', '2 Approvals']]} onChange={setUnder} /></Kv>
       <Kv k="Over Threshold"><Seg value={over} options={[['1', '1 Approval'], ['2', '2 Approvals'], ['3', '3 Approvals']]} onChange={setOver} /></Kv>
       <Kv k="Applies To">Pre-Approvals and Reimbursements<span className="info" title="One rule for both request types. Changing it applies to requests still waiting; finished approvals stand.">?</span></Kv>
       <Kv k="Always">Requestor excluded · one approval per member</Kv>
+      <Kv k="Bookkeeper"><Check checked={bk} onChange={setBk}>The bookkeeper may approve (for testing)</Check></Kv>
       <Kv k="Preview">{amt >= 0 ? 'Up to ' + money(amt) + ': ' + ap(under) + ' · over ' + money(amt) + ': ' + ap(over) : ''}</Kv>
       <Err msg={err} />
     </Modal>
   );
 }
 
-/** The board enters a request on a team's behalf. Overdue receipts and short funds warn; they never block. */
+/** The board enters a request on a team's behalf. Overdue receipts and short funds warn here; paying is where the money rules block. */
 function RequestForm({ id }: { id?: string }) {
-  const { db, calc, run, me } = useData();
+  const { db, calc, run } = useData();
   const ui = useUI();
   const old = id ? calc.request(id) : null;
   const firstTeam = db.teams[0];
@@ -418,11 +430,10 @@ function RequestForm({ id }: { id?: string }) {
       pay_to: R ? 'Me by Zelle' : f.pay_to, vendor: orNull(f.vendor), needed_by: R ? null : f.needed_by || null, purchase_date: R ? f.purchase_date || null : null,
       zelle_contact: R ? orNull(f.zelle_contact) : null, receipt_path: R ? path : null, receipt_name: R ? name : null,
       requestor_name: orNull(f.requestor_name), requestor_email: orNull(f.requestor_email)?.toLowerCase() || null,
-      submitted: f.submitted || calc.today, status: f.status, notes: orNull(f.notes),
+      submitted: f.submitted || calc.today, notes: orNull(f.notes),
     };
-    const ok = await run(() => (old ? supabase().from('team_requests').update(row).eq('id', old.id) : supabase().from('team_requests').insert({ ...row, created_by: me })), old ? 'Request saved' : 'Request entered · waiting for approval');
-    if (ok === false) { if (file && path !== old?.receipt_path) await removeFiles([path]); return; }
-    if (file && old?.receipt_path && old.receipt_path !== path) await removeFiles([old.receipt_path]);
+    const ok = await run(() => rpc('request_save', { p: { ...row, id: old?.id } }), old ? 'Request saved' : 'Request entered · waiting for approval');
+    if (ok === false) return;
     ui.close();
   };
   return (
@@ -447,7 +458,7 @@ function RequestForm({ id }: { id?: string }) {
         <Kv k="Needed By"><DateIn value={f.needed_by} onChange={(v) => set({ needed_by: v })} /></Kv>
       </>}
       <Kv k="Submitted"><DateIn value={f.submitted} onChange={(v) => set({ submitted: v })} /></Kv>
-      {old ? <Kv k="Status"><Select value={f.status} onChange={(v) => set({ status: (v || 'Submitted') as TeamRequest['status'] })} options={REQUEST_STATUSES.map((s) => [s, s])} /><div className="muted" style={{ fontSize: 12 }}>Only for corrections. Approvals, payments and receipts set this themselves.</div></Kv> : null}
+      {old ? <Kv k="Status"><St s={old.status} /><div className="muted" style={{ fontSize: 12 }}>Approving, declining, paying and closing set this. It is not edited by hand.</div></Kv> : null}
       <Kv k="Board Notes"><Area value={f.notes} onChange={(v) => set({ notes: v })} /></Kv>
       {t ? <Kv k="Team Fund">{money(calc.fundBalance(t.fund_id))} balance · {money(calc.teamMoney(t).approvedUnpaid)} approved, not paid</Kv> : null}
       <Warnings list={warnings} />
@@ -533,22 +544,14 @@ function TeamForm({ id }: { id?: string }) {
       ein: orNull(f.ein), school: orNull(f.school), students: f.students ? parseInt(f.students, 10) || null : null, affiliated: f.affiliated || null, blurb: orNull(f.blurb),
       zeffy_name: orNull(f.zeffy_name), fund_id: f.newFund ? null : f.fund_id || null,
     };
-    const sb = supabase();
-    const res = await run(async () => {
-      const t = old ? await sb.from('teams').update(row).eq('id', old.id).select('id').single() : await sb.from('teams').insert(row).select('id').single();
-      if (t.error || !f.newFund) return t;
-      const fund = await sb.from('funds').insert({ name: row.short + ' Team Fund', restricted: true, team_id: t.data.id, purpose: 'Restricted to ' + row.name }).select('id').single();
-      if (fund.error) return fund;
-      return sb.from('teams').update({ fund_id: fund.data.id }).eq('id', t.data.id);
-    }, old ? 'Team saved' : 'Team added');
+    const res = await run(() => rpc('team_save', { p: { ...row, id: old?.id, new_fund: !old && f.newFund } }), old ? 'Team saved' : 'Team added');
     if (res !== false) ui.close();
   };
   const del = async () => {
     if (!old) return;
-    const n = calc.teamRequests(old.id).length;
-    if (n) { setErr(`${old.short} has ${n} requests. Delete those first, or keep the team.`); return; }
-    if (!(await ui.confirm({ title: 'Delete Team', body: <>Delete {old.name}? Its fund stays on the Ledger.</>, ok: 'Delete', danger: true }))) return;
-    const ok = await run(() => supabase().from('teams').delete().eq('id', old.id), 'Team deleted');
+    const why = await ui.ask({ title: 'Archive Team', body: <>Archive {old.name}? A team with money in its fund or open requests stays until those are settled. Its history stays on record.</>, ok: 'Archive', danger: true });
+    if (!why) return;
+    const ok = await run(() => rpc('archive_record', { p_table: 'teams', p_id: old.id, p_reason: why }), 'Team archived');
     if (ok !== false) ui.close();
   };
   const logins = old ? teamLogins(calc, old.id) : null;

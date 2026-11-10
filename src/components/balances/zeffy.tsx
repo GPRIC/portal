@@ -129,7 +129,7 @@ function UnassignedModal() {
     setBusy(true);
     const ok = await run(async () => {
       for (const g of gifts) {
-        const { error } = await supabase().from('donations').update({ fund_id: pick[g.id] || g.fund_id, unassigned: false }).eq('id', g.id);
+        const { error } = await supabase().rpc('gift_assign_fund', { p_id: g.id, p_fund_id: pick[g.id] || g.fund_id });
         if (error) return { error };
       }
       return { error: null };

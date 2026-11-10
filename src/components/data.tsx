@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabase/client';
 import { BUCKET } from '@/lib/supabase/env';
 import { Calc } from '@/lib/calc';
 import { todayIso } from '@/lib/format';
-import { TABLES, type Db, type Settings, type TableName } from '@/lib/types';
+import { TABLES, type Db, type Role, type Settings, type TableName, type Totals } from '@/lib/types';
 import { useUI } from './ui';
 
 const NUMERIC: Partial<Record<TableName, string[]>> = {
@@ -29,18 +29,30 @@ async function fetchAll(table: TableName): Promise<Record<string, unknown>[]> {
   const nums = NUMERIC[table] || [];
   if (nums.length) out.forEach((r) => nums.forEach((k) => { if (r[k] != null) r[k] = Number(r[k]); }));
   out.forEach((r) => { r.id = String(r[KEY[table] || 'id']); });
-  return out;
+  // Archived records drop out of the pages (they stay in the database and in History).
+  return out.filter((r) => !r.archived_at);
 }
+
+const TEXT_KEYS = new Set(['id', 'team_id', 'name']);
+/** portal_totals sends numbers; PostgREST may send numerics as strings. */
+const numify = (o: unknown): unknown => (Array.isArray(o) ? o.map(numify)
+  : o && typeof o === 'object' ? Object.fromEntries(Object.entries(o).map(([k, v]) => [k, typeof v === 'string' && !TEXT_KEYS.has(k) && /^-?\d+(\.\d+)?$/.test(v) ? Number(v) : numify(v)]))
+  : o);
 
 async function loadDb(): Promise<Db> {
   const sb = supabase();
-  const [settings, ...rows] = await Promise.all([
+  const [settings, totals, role, ...rows] = await Promise.all([
     sb.from('settings').select('*').eq('id', 1).maybeSingle(),
+    sb.rpc('portal_totals'),
+    sb.rpc('my_role'),
     ...TABLES.map(fetchAll),
   ]);
   if (settings.error) throw new Error('settings: ' + settings.error.message);
+  if (totals.error) throw new Error('totals: ' + totals.error.message);
   const db = { settings: (settings.data || { id: 1, org: 'GPRIC', short: 'GPRIC', ein: null, fy_start: '2026-07-01', fy_label: '', receipt_days: 60, approval_threshold: 500, approvals_under: 1, approvals_over: 2, general_fund_id: null }) as Settings } as Db;
   db.settings.approval_threshold = Number(db.settings.approval_threshold ?? 500);
+  db.totals = numify(totals.data) as Totals;
+  db.role = (role.data as Role | null) || null;
   TABLES.forEach((t, i) => { (db as Record<string, unknown>)[t] = rows[i]; });
   return db;
 }
@@ -52,6 +64,11 @@ type DataCtx = {
   anySample: boolean;
   /** Who is signed in, as a short name for "added by" fields. */
   me: string;
+  role: Role | null;
+  /** The Treasurer: approval rules, unlocking a month and overriding a money rule. */
+  isTreasurer: boolean;
+  /** Pays requests and closes them (Treasurer and bookkeeper). */
+  canPay: boolean;
 };
 const Ctx = createContext<DataCtx | null>(null);
 export function useData() {
@@ -91,7 +108,8 @@ export function DataProvider({ user, children }: { user: User; children: ReactNo
     const anySample = TABLES.some((t) => (db[t] as { sample: boolean }[]).some((r) => r.sample));
     const meta = (user.user_metadata || {}) as { full_name?: string; name?: string };
     const me = meta.full_name || meta.name || db.board_members.find((m) => m.email && m.email.toLowerCase() === (user.email || '').toLowerCase())?.name || user.email || 'Board';
-    return { db, calc, user, reload, run, anySample, me };
+    const role = db.role;
+    return { db, calc, user, reload, run, anySample, me, role, isTreasurer: role === 'treasurer', canPay: role === 'treasurer' || role === 'bookkeeper' };
   }, [db, today, user, reload, run]);
 
   if (err && !db) return <div className="wrap"><div className="panel empty">Could not load the portal data. {err}<div style={{ marginTop: 10 }}><button className="btn" onClick={reload}>Try Again</button></div></div></div>;
@@ -100,8 +118,8 @@ export function DataProvider({ user, children }: { user: User; children: ReactNo
 }
 
 function friendly(m: string) {
-  if (/foreign key/i.test(m) && /ledger/i.test(m)) return 'This is still used by ledger rows. Move or delete those first.';
-  if (/foreign key/i.test(m)) return 'Other records still use this one. Change or delete them first.';
+  if (/foreign key/i.test(m)) return 'Other records still use this one. Change or archive them first.';
+  if (/^Blocked:|not allowed for your role|Only the Treasurer|locked|archived, never deleted|status changes only/i.test(m)) return m;
   if (/row-level security|permission denied|42501/i.test(m)) return 'Not allowed. Sign in again with your two-step code.';
   return m;
 }
@@ -120,7 +138,5 @@ export async function openFile(path: string) {
   if (error || !data) { w?.close(); alert('Could not open the file: ' + (error?.message || 'unknown error')); return; }
   if (w) w.location.href = data.signedUrl; else window.location.href = data.signedUrl;
 }
-export async function removeFiles(paths: (string | null | undefined)[]) {
-  const p = paths.filter(Boolean) as string[];
-  if (p.length) await supabase().storage.from(BUCKET).remove(p);
-}
+/** A database action, for run(): run(() => rpc('ledger_add', { p: row }), 'Saved'). Files are never removed. */
+export const rpc = (fn: string, args?: Record<string, unknown>) => supabase().rpc(fn, args);

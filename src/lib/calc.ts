@@ -1,5 +1,6 @@
-// Every total in the portal is calculated here, so every page agrees (ported from the demo's shared/store.js Calc).
-import type { Db, Donation, Fund, Grant, Ledger, Member, Team, TeamRequest } from './types';
+// Every figure a page shows comes through here, so every page agrees. Money totals (fund balances, cash, the year's
+// money in and out) are worked out once in the database by portal_totals() (0004_money_rules.sql); this class reads them.
+import type { Db, Donation, Fund, FundTotal, Grant, Ledger, Member, Team, TeamRequest } from './types';
 import { addDays, daysBetween, round2, sum } from './format';
 
 export type FundRow = { fund: Fund; opening: number; inn: number; out: number; balance: number };
@@ -30,42 +31,27 @@ export class Calc {
   /** This fiscal year's ledger rows. */
   fyLedger(): Ledger[] { return this.db.ledger.filter((l) => l.date >= this.fyStart); }
 
-  fundBalance(fid: string | null | undefined): number {
-    return round2(sum(this.db.ledger.filter((l) => l.fund_id === fid), (l) => (l.dir === 'in' ? l.amount : -l.amount)));
-  }
+  /** A fund's figures from portal_totals (zeros for a fund with no entries yet). */
+  fundTotal(fid: string | null | undefined): FundTotal | null { return this.db.totals.funds.find((x) => x.id === fid) || null; }
+  fundBalance(fid: string | null | undefined): number { return this.fundTotal(fid)?.balance ?? 0; }
+  /** Money left after requests already approved but not yet paid. */
+  fundAvailable(fid: string | null | undefined): number { return this.fundTotal(fid)?.available ?? 0; }
   funds(): FundRow[] {
     return this.db.funds.map((f) => {
-      const rows = this.db.ledger.filter((l) => l.fund_id === f.id);
-      const opening = sum(rows.filter((l) => l.source === 'Opening Balance'), (l) => l.amount);
-      const inn = sum(rows.filter((l) => l.dir === 'in' && l.source !== 'Opening Balance'), (l) => l.amount);
-      const out = sum(rows.filter((l) => l.dir === 'out'), (l) => l.amount);
-      return { fund: f, opening: round2(opening), inn: round2(inn), out: round2(out), balance: round2(opening + inn - out) };
+      const t = this.fundTotal(f.id);
+      return { fund: f, opening: t?.opening ?? 0, inn: t?.inn ?? 0, out: t?.out ?? 0, balance: t?.balance ?? 0 };
     });
   }
-  cash() {
-    const fs = this.funds();
-    const restricted = sum(fs.filter((x) => x.fund.restricted), (x) => x.balance);
-    const unrestricted = sum(fs.filter((x) => !x.fund.restricted), (x) => x.balance);
-    return { total: round2(restricted + unrestricted), restricted: round2(restricted), unrestricted: round2(unrestricted), funds: fs };
-  }
-  /** Money in by source this fiscal year (excludes opening balances and returned team money). */
-  inBySource(): Record<string, number> {
-    const o: Record<string, number> = {};
-    this.fyLedger().filter((l) => l.dir === 'in' && l.source !== 'Opening Balance' && l.source !== 'Unspent Returned')
-      .forEach((l) => { const k = l.source || 'Other'; o[k] = round2((o[k] || 0) + l.amount); });
-    return o;
-  }
-  /** Money out by category this fiscal year; returned team money nets against Robotics Teams. */
-  outByCategory(): Record<string, number> {
-    const o: Record<string, number> = {};
-    const fy = this.fyLedger();
-    fy.filter((l) => l.dir === 'out').forEach((l) => { const k = l.category || 'Other'; o[k] = round2((o[k] || 0) + l.amount); });
-    const ret = sum(fy.filter((l) => l.source === 'Unspent Returned'), (l) => l.amount);
-    if (ret) o['Robotics Teams'] = round2((o['Robotics Teams'] || 0) - ret);
-    return o;
-  }
-  raised() { const o = this.inBySource(); return round2(sum(Object.keys(o), (k) => o[k])); }
-  spent() { const o = this.outByCategory(); return round2(sum(Object.keys(o), (k) => o[k])); }
+  cash() { return { ...this.db.totals.cash, funds: this.funds() }; }
+  /** Money in by source this fiscal year (excludes opening balances, returned team money and refunds). */
+  inBySource(): Record<string, number> { return this.db.totals.in_by_source; }
+  /** Money out by category this fiscal year; returned team money and refunds net against what they were spent on. */
+  outByCategory(): Record<string, number> { return this.db.totals.out_by_category; }
+  raised() { return this.db.totals.raised; }
+  spent() { return this.db.totals.spent; }
+  /** An entry that was undone, or the entry that undoes another. */
+  isReversed(l: Ledger) { return !!l.reversed_by_id; }
+  isReversal(l: Ledger) { return !!l.reverses_id; }
 
   static OPEN_GRANT = ['Prospect', 'Drafting', 'Applied'];
   grants() {
@@ -107,10 +93,8 @@ export class Calc {
   teamRequests(tid: string) { return this.db.team_requests.filter((r) => r.team_id === tid); }
   teamBlocked(tid: string) { return this.teamRequests(tid).filter((r) => this.isOverdue(r)); }
   teamMoney(t: Team) {
-    const reqs = this.teamRequests(t.id);
-    const balance = this.fundBalance(t.fund_id);
-    const approved = reqs.filter((r) => r.status === 'Approved');
-    return { balance, approvedUnpaid: sum(approved, (r) => r.amount), available: round2(balance - sum(approved, (r) => r.amount)) };
+    const ft = this.fundTotal(t.fund_id);
+    return { balance: ft?.balance ?? 0, approvedUnpaid: ft?.committed ?? 0, available: ft?.available ?? 0 };
   }
   interestedMember(tid: string): Member | null {
     return this.board().find((m) => m.interest_team_id === tid) || null;
@@ -143,8 +127,10 @@ export class Calc {
   }
 
   /* team balances */
+  /** The kind of money an entry is; a reversal counts as the kind of the entry it undoes. */
   kindOf(l: Ledger): MoneyKind {
-    if (l.dir === 'in') {
+    const dir = l.reverses_id ? (l.dir === 'in' ? 'out' : 'in') : l.dir;
+    if (dir === 'in') {
       if (l.source === 'Opening Balance') return 'Carry-Over';
       return this.donation(l.donation_id)?.channel === 'Zeffy' ? 'Zeffy' : 'Deposit';
     }
@@ -152,12 +138,10 @@ export class Calc {
   }
   donation(id: string | null | undefined): Donation | null { return id ? this.db.donations.find((d) => d.id === id) || null : null; }
   fundMoney(f: Fund): MoneyRow {
-    const k = { carry: 0, zeffy: 0, deposits: 0, reimbursements: 0, direct: 0 };
-    const key: Record<MoneyKind, keyof typeof k> = { 'Carry-Over': 'carry', Zeffy: 'zeffy', Deposit: 'deposits', Reimbursement: 'reimbursements', 'Direct Expense': 'direct' };
-    this.db.ledger.filter((l) => l.fund_id === f.id).forEach((l) => { k[key[this.kindOf(l)]] += l.amount; });
-    const r = Object.fromEntries(Object.entries(k).map(([a, b]) => [a, round2(b)])) as typeof k;
-    return { fund: f, team: this.db.teams.find((t) => t.fund_id === f.id) || this.team(f.team_id), ...r,
-      balance: round2(r.carry + r.zeffy + r.deposits - r.reimbursements - r.direct) };
+    const t = this.fundTotal(f.id);
+    return { fund: f, team: this.db.teams.find((x) => x.fund_id === f.id) || this.team(f.team_id),
+      carry: t?.carry ?? 0, zeffy: t?.zeffy ?? 0, deposits: t?.deposits ?? 0, reimbursements: t?.reimbursements ?? 0, direct: t?.direct ?? 0,
+      balance: t?.balance ?? 0 };
   }
   /** One row per team fund, then the unrestricted funds. */
   teamBalances(): MoneyRow[] {
@@ -186,7 +170,9 @@ export class Calc {
     const rows = this.db.ledger.filter((l) => l.date <= monthEnd);
     const book = round2(sum(rows, (l) => (l.dir === 'in' ? l.amount : -l.amount)));
     const cleared = this.clearedIds();
-    const outstanding = this.db.ledger.filter((l) => l.date <= monthEnd && l.dir === 'out' && !cleared.has(l.id) && l.source !== 'Opening Balance');
+    // An entry reversed by month end never reached the bank, so it and its reversal are left out (as bank_month_difference does).
+    const reversedBy = (l: Ledger) => { const z = l.reversed_by_id ? this.db.ledger.find((x) => x.id === l.reversed_by_id) : null; return !!z && z.date <= monthEnd; };
+    const outstanding = this.db.ledger.filter((l) => l.date <= monthEnd && l.dir === 'out' && !l.reverses_id && !reversedBy(l) && !cleared.has(l.id) && l.source !== 'Opening Balance');
     const transit = this.inTransit(monthEnd);
     const expected = round2(book + sum(outstanding, (l) => l.amount) - sum(transit, (d) => d.amount));
     return { book, outstanding, outstandingTotal: round2(sum(outstanding, (l) => l.amount)), transit, transitTotal: round2(sum(transit, (d) => d.amount)),
@@ -195,7 +181,7 @@ export class Calc {
   /** The month a date falls in is reconciled and locked. */
   lockedMonth(iso: string) { return this.db.bank_statements.some((s) => s.locked_at && s.month === iso.slice(0, 7) + '-01'); }
 
-  /** Warnings for money going out of a fund. They never block saving. */
+  /** The money rules for money going out of a fund (spend_check in the database). Breaking one blocks the save unless the Treasurer overrides. */
   spendWarnings(fundId: string, amount: number, category: string | null, exceptLedgerId?: string): string[] {
     const w: string[] = [];
     const f = this.fund(fundId);

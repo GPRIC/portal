@@ -31,7 +31,8 @@ export async function POST(req: Request) {
     data: { full_name: (b.name || '').trim() || undefined },
   });
   if (inv.error) {
-    await sb.from('team_invites').delete().eq('id', ins.data.id);
+    // Records are archived, never deleted (0004_money_rules.sql).
+    await sb.from('team_invites').update({ archived_at: new Date().toISOString(), archived_by: 'system', archive_reason: 'Invite email failed: ' + inv.error.message.slice(0, 200) }).eq('id', ins.data.id);
     const taken = /already|registered|exists/i.test(inv.error.message);
     return NextResponse.json({ error: taken ? 'That email already has a portal login. It cannot be a team login as well.' : inv.error.message }, { status: 400 });
   }

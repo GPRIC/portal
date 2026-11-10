@@ -9,6 +9,7 @@ import { supabase } from '@/lib/supabase/client';
 import { HELP } from '@/lib/help';
 import { initials } from '@/lib/format';
 import { DataProvider, useData } from './data';
+import { ROLE_LABEL } from '@/lib/types';
 import { Modal, UIHost, UIProvider, useUI } from './ui';
 import { TipsProvider } from './tips';
 
@@ -57,7 +58,7 @@ export function ThemeToggle() {
 function TopBar() {
   const path = usePathname();
   const router = useRouter();
-  const { me, user } = useData();
+  const { me, user, role } = useData();
   const signOut = async () => { await supabase().auth.signOut(); router.replace('/login'); router.refresh(); };
   return (
     <header className="top">
@@ -68,7 +69,8 @@ function TopBar() {
       </nav>
       <span className="chip who" tabIndex={0}>
         <span className="av grn">{initials(me)}</span><span className="who-name">{me}</span>
-        <span className="pop r">Signed in as {user.email}. Two-step sign-in is on.</span>
+        {role ? <span className="muted who-role">{ROLE_LABEL[role]}</span> : null}
+        <span className="pop r">Signed in as {user.email}{role ? ' · ' + ROLE_LABEL[role] : ''}. Two-step sign-in is on.</span>
       </span>
       <ThemeToggle />
       <button className="btn sm" onClick={signOut}>Sign Out</button>
@@ -103,9 +105,9 @@ export function Page({ title, help, actions, children }: { title: string; help?:
 }
 
 function SampleFlag() {
-  const { anySample, run } = useData();
+  const { anySample, run, isTreasurer } = useData();
   const ui = useUI();
-  if (!anySample) return null;
+  if (!anySample || !isTreasurer) return null;
   const clear = async () => {
     const ok = await ui.confirm({
       title: 'Clear Sample Data',
@@ -113,7 +115,7 @@ function SampleFlag() {
       ok: 'Clear Sample Data', danger: true,
     });
     if (!ok) return;
-    await run(() => supabase().rpc('clear_sample_data'), 'Sample data cleared');
+    await run(() => supabase().rpc('clear_sample_data'), 'Sample data cleared');  // Treasurer only (the database checks too)
   };
   return <button className="sample-flag" onClick={clear} title="Some names and figures here are made up to show how the portal works. Click to clear them.">Sample data · Clear</button>;
 }

@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { Page } from '@/components/shell';
-import { removeFiles, uploadFile, useData } from '@/components/data';
+import { rpc, uploadFile, useData } from '@/components/data';
 import { Amount, Area, DateIn, DocOpen, Err, Foot, FundSelect, num, orNull, str, Txt } from '@/components/forms';
 import { Badge, Card, Check, Kv, Lines, Modal, Pills, Seg, St, ST, Table, useUI, type Col } from '@/components/ui';
 import { supabase } from '@/lib/supabase/client';
@@ -80,7 +80,7 @@ function GrantForm({ id }: { id?: string }) {
       likelihood: lk, public: f.public, notes: orNull(f.notes),
     };
     setBusy(true);
-    const ok = await run(() => (old ? supabase().from('grants').update(row).eq('id', old.id) : supabase().from('grants').insert({ ...row, received: 0 })), old ? 'Grant saved' : 'Grant added');
+    const ok = await run(() => (old ? supabase().from('grants').update(row).eq('id', old.id) : supabase().from('grants').insert(row)), old ? 'Grant saved' : 'Grant added');
     setBusy(false);
     if (ok !== false) ui.close();
   };
@@ -99,13 +99,15 @@ function GrantForm({ id }: { id?: string }) {
     if ('error' in up) { setBusy(false); setErr('Upload failed: ' + up.error); return; }
     const ok = await run(() => supabase().from('documents').insert({ title: up.name, type: 'Grant', date: calc.today, linked_to: old.id, public: false, file_path: up.path, file_name: up.name, added_by: me }), 'File added');
     setBusy(false);
-    if (ok === false) await removeFiles([up.path]); else setFile(null);
+    if (ok !== false) setFile(null);
   };
   const del = async () => {
     if (!old) return;
-    const money_in = db.ledger.filter((l) => l.grant_id === old.id).length;
-    if (!(await ui.confirm({ title: 'Delete Grant', body: <>Delete {old.funder}, {old.program}?{money_in ? ` Its ${money_in} ledger entries stay, no longer linked to a grant.` : ''}{files.length ? ` Its ${files.length} files stay on Documents.` : ''}</>, ok: 'Delete', danger: true }))) return;
-    const ok = await run(() => supabase().from('grants').delete().eq('id', old.id), 'Grant deleted');
+    const money_in = db.ledger.filter((l) => l.grant_id === old.id && !l.reverses_id && !l.reversed_by_id).length;
+    if (money_in) { setErr(`${money_in} ledger entries record money from this grant. Reverse them on the Ledger first.`); return; }
+    const why = await ui.ask({ title: 'Archive Grant', body: <>Archive {old.funder}, {old.program}?{files.length ? ` Its ${files.length} files stay on Documents.` : ''}</>, ok: 'Archive', danger: true });
+    if (!why) return;
+    const ok = await run(() => rpc('archive_record', { p_table: 'grants', p_id: old.id, p_reason: why }), 'Grant archived');
     if (ok !== false) ui.close();
   };
 

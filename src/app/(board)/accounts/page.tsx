@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { Page } from '@/components/shell';
-import { useData } from '@/components/data';
+import { rpc, useData } from '@/components/data';
 import { Amount, Area, DateIn, Err, Foot, num, orNull, str, Txt } from '@/components/forms';
 import { Badge, Card, Kv, Lines, Modal, Pills, Seg, Table, useUI, type Col, type Tone } from '@/components/ui';
 import { supabase } from '@/lib/supabase/client';
@@ -61,7 +61,7 @@ function AccountForm({ id }: { id?: string }) {
   }));
   const [err, setErr] = useState<string | null>(null);
   const set = (p: Partial<typeof f>) => setF((x) => ({ ...x, ...p }));
-  if (id && !old) return <Modal title="Account"><div className="full empty">This account was deleted.</div></Modal>;
+  if (id && !old) return <Modal title="Account"><div className="full empty">This account was archived.</div></Modal>;
   const save = async () => {
     if (!f.service.trim()) { setErr('Name the service.'); return; }
     const cost = f.cost ? num(f.cost) : 0;
@@ -75,8 +75,9 @@ function AccountForm({ id }: { id?: string }) {
   };
   const del = async () => {
     if (!old) return;
-    if (!(await ui.confirm({ title: 'Delete Account', body: <>Remove {old.service} from the register? This does not close the account itself.</>, ok: 'Delete', danger: true }))) return;
-    const ok = await run(() => supabase().from('accounts').delete().eq('id', old.id), 'Account removed');
+    const why = await ui.ask({ title: 'Archive Account', body: <>Take {old.service} off the register? This does not close the account itself.</>, ok: 'Archive', danger: true });
+    if (!why) return;
+    const ok = await run(() => rpc('archive_record', { p_table: 'accounts', p_id: old.id, p_reason: why }), 'Account archived');
     if (ok !== false) ui.close();
   };
   const toggle = (r: string, v: boolean) => set({ admins: v ? ROLES.filter((x) => x === r || f.admins.includes(x)).concat(f.admins.filter((x) => !ROLES.includes(x))) : f.admins.filter((x) => x !== r) });

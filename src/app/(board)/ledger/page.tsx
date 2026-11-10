@@ -2,10 +2,9 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { Page } from '@/components/shell';
-import { removeFiles, uploadFile, useData } from '@/components/data';
+import { rpc, uploadFile, useData } from '@/components/data';
 import { Amount, Area, DateIn, Err, FilePick, Foot, FundSelect, num, orNull, Select, str, Txt } from '@/components/forms';
 import { Badge, Card, Check, Kv, Lines, Modal, Pills, Seg, Table, useUI, Warnings, type Col, type Tone } from '@/components/ui';
-import { supabase } from '@/lib/supabase/client';
 import { date, money, sum } from '@/lib/format';
 import type { Ledger } from '@/lib/types';
 
@@ -37,7 +36,8 @@ export default function LedgerPage() {
   const restricted = (l: Ledger) => !!calc.fund(l.fund_id)?.restricted;
   const P: [string, Tone, (l: Ledger) => boolean][] = [
     ['All', 'gry', () => true], ['Money In', 'grn', (l) => l.dir === 'in' && l.source !== 'Opening Balance'], ['Money Out', 'red', (l) => l.dir === 'out'],
-    ['Restricted', 'amb', restricted], ['Unrestricted', 'gry', (l) => !restricted(l)], ['Missing Receipt', 'amb', (l) => l.dir === 'out' && !l.receipt],
+    ['Restricted', 'amb', restricted], ['Unrestricted', 'gry', (l) => !restricted(l)], ['Missing Receipt', 'amb', (l) => l.dir === 'out' && !l.receipt && !l.reverses_id && !l.reversed_by_id],
+    ['Reversed', 'vio', (l) => !!l.reverses_id || !!l.reversed_by_id],
   ];
   const pills = P.map(([k, tone, f]) => ({ key: k, label: k, tone, count: L.filter(f).length }));
   if (filt.startsWith('F:')) pills.push({ key: filt, label: fundName(filt.slice(2)), tone: 'blu', count: L.filter((l) => l.fund_id === filt.slice(2)).length });
@@ -45,7 +45,7 @@ export default function LedgerPage() {
 
   const cols: Col<Ledger>[] = [
     { k: 'date', label: 'Date', html: (l) => date(l.date) },
-    { k: 'memo', label: 'Description' },
+    { k: 'memo', label: 'Description', html: (l) => <>{l.memo}{l.reverses_id ? <> <Badge tone="vio">Reversal</Badge></> : l.reversed_by_id ? <> <Badge tone="gry">Reversed</Badge></> : null}</> },
     { k: 'party', label: 'From / To', sv: party, html: party },
     { k: 'fund_id', label: 'Fund', sv: (l) => fundName(l.fund_id), html: (l) => fundName(l.fund_id) },
     { k: 'kind', label: 'Source / Category', sv: (l) => l.source || l.category, html: (l) => l.source || l.category },
@@ -81,9 +81,10 @@ export default function LedgerPage() {
   );
 }
 
-/** Add or edit one ledger row. Money out warns when it overspends a fund or misuses restricted money; it never blocks. */
+/** Add or edit one ledger row. Money out that overspends a fund or misuses restricted money is blocked unless the
+ *  Treasurer overrides with a reason. Changing the money of an entry posts a correction (reverse and re-enter); nothing is deleted. */
 function EntryForm({ id, dir }: { id?: string; dir: 'in' | 'out' }) {
-  const { db, calc, run } = useData();
+  const { db, calc, run, isTreasurer } = useData();
   const ui = useUI();
   const old = id ? db.ledger.find((l) => l.id === id) : undefined;
   const [f, setF] = useState(() => ({
@@ -96,7 +97,8 @@ function EntryForm({ id, dir }: { id?: string; dir: 'in' | 'out' }) {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const set = (p: Partial<typeof f>) => setF((x) => ({ ...x, ...p }));
-  if (id && !old) return <Modal title="Transaction"><div className="full empty">This entry was deleted.</div></Modal>;
+  if (id && !old) return <Modal title="Transaction"><div className="full empty">This entry is no longer in the books.</div></Modal>;
+  if (old && (old.reverses_id || old.reversed_by_id)) return <ReversedEntry l={old} />;
 
   const fundId = f.fund_id || db.funds[0]?.id || '';
   const amt = num(f.amount);
@@ -116,33 +118,51 @@ function EntryForm({ id, dir }: { id?: string; dir: 'in' | 'out' }) {
       if ('error' in up) { setBusy(false); setErr('Upload failed: ' + up.error); return; }
       receipt_path = up.path; receipt_name = up.name;
     }
-    const row: Partial<Ledger> = {
+    const row: Record<string, unknown> = {
       date: f.date || calc.today, amount: amt, fund_id: fundId, memo: orNull(f.memo) || orNull(f.party) || (dir === 'in' ? f.source : f.category),
       ...(linkedGift ? {} : { party: orNull(f.party) }),
       ...(dir === 'out' ? { category: f.category, receipt: f.receipt || !!receipt_path, receipt_path, receipt_name } : linkedGift || req ? {} : { source: f.source }),
     };
-    const ok = await run(() => (old ? supabase().from('ledger').update(row).eq('id', old.id) : supabase().from('ledger').insert({ ...row, dir })),
-      old ? 'Saved · totals updated' : dir === 'in' ? 'Money in recorded · totals updated' : 'Expense saved · totals updated');
+    // The money rules: a blocked spend needs the Treasurer's reason.
+    const moneyChanged = !old || old.amount !== amt || old.fund_id !== fundId || old.date !== row.date;
+    if (dir === 'out' && warnings.length && moneyChanged) {
+      if (!isTreasurer) { setBusy(false); setErr('Blocked: ' + warnings.join(' ') + ' Only the Treasurer can override.'); return; }
+      const why = await ui.ask({ title: 'Override A Money Rule', body: <>{warnings.map((w, i) => <div key={i}>{w}</div>)}</>, ok: 'Override And Save', label: 'Why this is allowed' });
+      if (!why) { setBusy(false); return; }
+      row.override = why;
+    }
+    let ok;
+    if (!old) {
+      ok = await run(() => rpc('ledger_add', { p: { ...row, dir } }), dir === 'in' ? 'Money in recorded · totals updated' : 'Expense saved · totals updated');
+    } else if (moneyChanged) {
+      if (linkedGift) { setBusy(false); setErr('This entry is a gift. Change its amount, date or fund from the donor on Donors.'); return; }
+      const why = await ui.ask({ title: 'Correct This Entry', body: <>The original entry stays in the books and is reversed; the corrected entry is added in its place.</>, ok: 'Post Correction', label: 'Reason for the correction' });
+      if (!why) { setBusy(false); return; }
+      ok = await run(() => rpc('ledger_correct', { p_id: old.id, p: row, p_reason: why }), 'Correction posted · totals updated');
+    } else {
+      ok = await run(() => rpc('ledger_edit', { p_id: old.id, p: row }), 'Saved');
+    }
     setBusy(false);
     if (ok === false) return;
-    if (old?.receipt_path && old.receipt_path !== receipt_path) await removeFiles([old.receipt_path]);
     ui.close();
   };
+  // Undo an entry: posts the opposite entry and keeps both. A request's payment is undone from the request.
   const del = async () => {
     if (!old) return;
-    const yes = await ui.confirm({
-      title: 'Delete This Entry',
-      body: <>Delete {money(old.amount, true)} {old.dir === 'in' ? 'into' : 'out of'} {calc.fundName(old.fund_id)} on {date(old.date)}?{linkedGift ? ' The gift it records is deleted from the donor too.' : ''}{req ? ' The team request it paid keeps its status; change that on Team Requests if needed.' : ''}</>,
-      ok: 'Delete', danger: true,
+    if (req) { setErr('This entry pays team request ' + req.id + '. Refund or cancel it from Team Requests.'); return; }
+    const why = await ui.ask({
+      title: 'Reverse This Entry',
+      body: <>Reverse {money(old.amount, true)} {old.dir === 'in' ? 'into' : 'out of'} {calc.fundName(old.fund_id)} on {date(old.date)}? An opposite entry is posted today and both stay in the books.{linkedGift ? ' The gift it records is taken off the donor.' : ''}</>,
+      ok: 'Reverse', danger: true, label: 'Reason',
     });
-    if (!yes) return;
-    const ok = await run(() => supabase().from('ledger').delete().eq('id', old.id), 'Entry deleted · totals updated');
-    if (ok !== false) { await removeFiles([old.receipt_path]); ui.close(); }
+    if (!why) return;
+    const ok = await run(() => rpc('ledger_reverse', { p_id: old.id, p_reason: why }), 'Entry reversed · totals updated');
+    if (ok !== false) ui.close();
   };
 
   const title = old ? (old.memo || 'Transaction') : dir === 'in' ? 'Record Money In' : 'Add Expense';
   return (
-    <Modal title={title} foot={<Foot onDelete={old ? del : undefined} onSave={save} busy={busy} />}>
+    <Modal title={title} foot={<Foot onDelete={old && !req ? del : undefined} deleteLabel="Reverse" onSave={save} busy={busy} />}>
       {old ? <Kv k="Direction">{old.dir === 'in' ? <Badge tone="grn">Money In</Badge> : <Badge tone="red">Money Out</Badge>}</Kv> : null}
       {dir === 'in' && !old ? <div className="full muted">For a gift from a donor, use Donors, Log Donation, so the donor is credited and thanked.</div> : null}
       {linkedGift ? <Kv k="Donor">{donor?.name || old?.party} · <Link className="doclink" href="/donors">Donors</Link><div className="muted" style={{ fontSize: 12 }}>This entry is a gift. Changing the amount, date or fund here changes the gift too.</div></Kv> : null}
@@ -170,14 +190,31 @@ function EntryForm({ id, dir }: { id?: string; dir: 'in' | 'out' }) {
           </Kv>
         </>
       ) : null}
-      <Warnings list={warnings} />
+      <Warnings list={warnings} blocks />
       <Err msg={err} />
     </Modal>
   );
 }
 
+/** A reversed entry, or the reversal itself: read only, with the link between the two. */
+function ReversedEntry({ l }: { l: Ledger }) {
+  const { db, calc } = useData();
+  const ui = useUI();
+  const other = db.ledger.find((x) => x.id === (l.reverses_id || l.reversed_by_id));
+  return (
+    <Modal title={l.memo || 'Transaction'}>
+      <Kv k="Status">{l.reverses_id ? <Badge tone="vio">Reversal</Badge> : <Badge>Reversed</Badge>}</Kv>
+      <Kv k="Amount">{money(l.amount, true)} {l.dir === 'in' ? 'into' : 'out of'} {calc.fundName(l.fund_id)}</Kv>
+      <Kv k="Date">{date(l.date)}</Kv>
+      <Kv k="Reason">{l.reason || other?.reason || '—'}</Kv>
+      {other ? <Kv k={l.reverses_id ? 'Undoes' : 'Undone By'}><button className="doclink" onClick={() => { ui.close(); ui.open(<EntryForm id={other.id} dir={other.dir} />); }}>{other.id} · {date(other.date)}</button></Kv> : null}
+      <div className="full muted">Reversed entries stay in the books. To change the money again, add a new entry.</div>
+    </Modal>
+  );
+}
+
 function FundForm({ id }: { id?: string }) {
-  const { db, calc, run } = useData();
+  const { db, calc, run, isTreasurer } = useData();
   const ui = useUI();
   const old = id ? calc.fund(id) : null;
   const [f, setF] = useState({ name: old?.name || '', restricted: old ? old.restricted : true, team_id: old?.team_id || '', purpose: old?.purpose || '' });
@@ -187,21 +224,25 @@ function FundForm({ id }: { id?: string }) {
 
   const save = async () => {
     if (!f.name.trim()) { setErr('Name the fund.'); return; }
-    const row = { name: f.name.trim(), restricted: f.restricted, team_id: f.team_id || null, purpose: orNull(f.purpose) };
-    const ok = await run(() => (old ? supabase().from('funds').update(row).eq('id', old.id) : supabase().from('funds').insert(row)), old ? 'Fund saved' : 'Fund added');
+    if (old && old.restricted !== f.restricted && !isTreasurer) { setErr('Only the Treasurer can change whether a fund is restricted.'); return; }
+    const row = { id: old?.id, name: f.name.trim(), restricted: f.restricted, team_id: f.team_id || null, purpose: orNull(f.purpose) };
+    const ok = await run(() => rpc('fund_save', { p: row }), old ? 'Fund saved' : 'Fund added');
     if (ok !== false) ui.close();
   };
   const del = async () => {
     if (!old) return;
-    if (used) { setErr(`${used} ledger entries use this fund. Move or delete them first.`); return; }
-    if (!(await ui.confirm({ title: 'Delete Fund', body: <>Delete {old.name}?</>, ok: 'Delete', danger: true }))) return;
-    const ok = await run(() => supabase().from('funds').delete().eq('id', old.id), 'Fund deleted');
+    if (calc.fundBalance(old.id) !== 0) { setErr('This fund still holds ' + money(calc.fundBalance(old.id)) + '. Move the money first.'); return; }
+    const why = await ui.ask({ title: 'Archive Fund', body: <>Archive {old.name}? Its past entries stay in the books.</>, ok: 'Archive', danger: true });
+    if (!why) return;
+    const ok = await run(() => rpc('archive_record', { p_table: 'funds', p_id: old.id, p_reason: why }), 'Fund archived');
     if (ok !== false) ui.close();
   };
   return (
     <Modal title={old ? old.name : 'Add Fund'} foot={<Foot onDelete={old ? del : undefined} onSave={save} />}>
       <Kv k="Name"><Txt value={f.name} onChange={(v) => set({ name: v })} autoFocus /></Kv>
-      <Kv k="Restricted"><Check checked={f.restricted} onChange={(v) => set({ restricted: v })}>Money given for a set purpose</Check></Kv>
+      <Kv k="Restricted">{old && !isTreasurer
+        ? <>{f.restricted ? 'Restricted' : 'Unrestricted'} <span className="muted">· only the Treasurer changes this</span></>
+        : <Check checked={f.restricted} onChange={(v) => set({ restricted: v })}>Money given for a set purpose</Check>}</Kv>
       <Kv k="Team"><Select value={f.team_id} onChange={(v) => set({ team_id: v })} blank="Not a team fund" options={db.teams.map((t) => [t.id, t.name])} /></Kv>
       <Kv k="Purpose"><Area value={f.purpose} onChange={(v) => set({ purpose: v })} placeholder="What this money may be spent on" /></Kv>
       {old ? <Kv k="Balance">{money(calc.fundBalance(old.id))} · {used} entries</Kv> : null}

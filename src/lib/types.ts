@@ -3,9 +3,16 @@
 
 export type Settings = { id: number; org: string; short: string; ein: string | null; fy_start: string; fy_label: string; receipt_days: number;
   approval_threshold: number; approvals_under: number; approvals_over: number; general_fund_id: string | null;
+  bookkeeper_can_approve?: boolean;
 };
 
-type Base = { id: string; sample: boolean; created_at?: string };
+/** Board-side roles (0004_money_rules.sql). Approval rules, month unlock and overrides are the Treasurer's. */
+export type Role = 'treasurer' | 'board' | 'bookkeeper' | 'cpa';
+export const ROLE_LABEL: Record<Role, string> = { treasurer: 'Treasurer', board: 'Board', bookkeeper: 'Bookkeeper', cpa: 'CPA (read only)' };
+
+/** Records are archived, never deleted. */
+type Archive = { archived_at?: string | null; archived_by?: string | null; archive_reason?: string | null };
+type Base = { id: string; sample: boolean; created_at?: string } & Archive;
 
 export type Team = Base & {
   name: string; short: string; program: string | null; level: string | null; season: string | null; fund_id: string | null;
@@ -67,6 +74,8 @@ export type Ledger = Base & {
   date: string; dir: 'in' | 'out'; amount: number; fund_id: string; source: string | null; category: string | null; party: string | null;
   donor_id: string | null; memo: string | null; donation_id: string | null; request_id: string | null; grant_id: string | null;
   receipt: boolean; receipt_path: string | null; receipt_name: string | null; pay_method: string | null; pay_ref: string | null;
+  /** A reversal points at the entry it undoes; the undone entry points back at its reversal. */
+  reverses_id: string | null; reversed_by_id: string | null; reason: string | null;
 };
 export type Receipt = Base & {
   request_id: string; vendor: string | null; amount: number; date: string; file_name: string | null; file_path: string | null; uploaded_by: string | null;
@@ -82,16 +91,27 @@ export type Doc = Base & {
 };
 
 export type TeamUser = { id: string; user_id: string; team_id: string; role: 'Coach' | 'Treasurer'; name: string | null; email: string | null; zelle_contact: string | null; added_at: string };
-export type TeamInvite = { id: string; team_id: string; email: string; name: string | null; role: 'Coach' | 'Treasurer'; invited_by: string | null; invited_at: string; user_id: string | null; sample: boolean };
+export type TeamInvite = { id: string; team_id: string; email: string; name: string | null; role: 'Coach' | 'Treasurer'; invited_by: string | null; invited_at: string; user_id: string | null; sample: boolean } & Archive;
 export type BankStatement = Base & {
   month: string; file_path: string | null; file_name: string | null; ending_balance: number | null; difference: number | null;
   locked_at: string | null; locked_by: string | null; notes: string | null;
+  unlocked_at?: string | null; unlocked_by?: string | null; unlock_reason?: string | null;
 };
 export type BankLine = Base & { statement_id: string; date: string; description: string | null; amount: number; matched_ledger_id: string | null; matched_payout_date: string | null };
 export type ZeffySync = { id: string; ran_at: string; source: 'api' | 'file' | 'webhook'; inserted: number; updated: number; skipped: number; error: string | null };
 
+/** One fund's figures from portal_totals(). */
+export type FundTotal = { id: string; name: string; restricted: boolean; team_id: string | null; opening: number; inn: number; out: number; carry: number;
+  zeffy: number; deposits: number; reimbursements: number; direct: number; balance: number; committed: number; available: number };
+/** Every money figure the board pages show, worked out once in the database (portal_totals). */
+export type Totals = { funds: FundTotal[]; cash: { total: number; restricted: number; unrestricted: number };
+  in_by_source: Record<string, number>; out_by_category: Record<string, number>; raised: number; spent: number };
+
 export type Db = {
   settings: Settings;
+  totals: Totals;
+  /** The signed-in person's role (null only if access was removed mid-session). */
+  role: Role | null;
   teams: Team[]; funds: Fund[]; board_members: Member[]; grants: Grant[]; donors: Donor[]; donations: Donation[];
   meetings: Meeting[]; meeting_votes: Vote[]; team_requests: TeamRequest[]; ledger: Ledger[]; receipts: Receipt[];
   accounts: Account[]; documents: Doc[];

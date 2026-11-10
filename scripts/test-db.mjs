@@ -9,6 +9,7 @@ const BOARD1 = '00000000-0000-0000-0000-0000000000b1';
 const BOARD2 = '00000000-0000-0000-0000-0000000000b2';
 const COACH = '00000000-0000-0000-0000-0000000000c1';
 const OTHER = '00000000-0000-0000-0000-0000000000c2';
+const BOARD3 = '00000000-0000-0000-0000-0000000000b3';
 
 let failed = 0;
 const ok = (cond, label) => { console.log((cond ? 'PASS ' : 'FAIL ') + label); if (!cond) failed++; };
@@ -44,6 +45,7 @@ ok((await db.query(`select 1 from public.portal_access where user_id = $1`, [COA
 
 const B1 = board(BOARD1, 'president@gpric.net');
 const B2 = board(BOARD2, 'director1@gpric.net');
+const B3 = board(BOARD3, 'books@example.org');
 const C = board(COACH, 'coach2@example.org');
 const C1 = { ...C, aal: 'aal1' };
 
@@ -65,11 +67,21 @@ ok(portal.requests.every((r) => r.id) && portal.gifts.every((g) => 'donor' in g)
 const otherIds = (await db.query(`select id from public.team_requests where team_id <> 'T-9255'`)).rows.map((r) => r.id);
 ok(!portal.requests.some((r) => otherIds.includes(r.id)), 'team portal hides other teams\' requests');
 
-// Settings: general fund for Zeffy.
-await as(B1, `update public.settings set general_fund_id = 'F-GEN'`);
+// Roles: BOARD1 is the Treasurer, BOARD2 a board member, BOARD3 the bookkeeper.
+await db.exec(`insert into auth.users (id, email, invited_at) values ('${BOARD3}', 'books@example.org', now());
+  update public.portal_access set role = 'treasurer' where user_id = '${BOARD1}';
+  update public.portal_access set role = 'bookkeeper' where user_id = '${BOARD3}';`);
+ok((await as(B1, `select public.my_role() r`)).rows[0].r === 'treasurer', 'role: treasurer');
+ok((await as(B3, `select public.whoami() w`)).rows[0].w === 'board', 'bookkeeper is on the board side');
+await fails(B2, `select public.settings_save_rules(600, 1, 2)`, [], /not allowed for your role/, 'approval rules are Treasurer only');
+await as(B1, `select public.settings_save_rules(500, 1, 2)`);
+await fails(B1, `update public.settings set general_fund_id = 'F-GEN'`, [], /permission denied/, 'settings take no direct writes');
+await db.exec(`update public.settings set general_fund_id = 'F-GEN'`);
 
 // Submit: clear any overdue on T-9255 first so the block test is deliberate.
-await db.exec(`update public.team_requests set status = 'Closed' where team_id = 'T-9255' and status = 'Receipts Due'`);
+await db.exec(`select set_config('gpric.via', 'admin', false); update public.team_requests set status = 'Closed' where team_id = 'T-9255' and status = 'Receipts Due'; select set_config('gpric.via', '', false);`);
+// Give the team fund enough money for the tests below.
+await as(B1, `select public.ledger_add($1)`, [JSON.stringify({ date: '2026-07-02', dir: 'in', amount: 5000, fund_id: 'F-9255', source: 'Test Deposit' })]);
 const reqP = (await as(C, `select public.submit_team_request($1) id`, [JSON.stringify({
   type: 'Pre-Approval', purpose: 'Field elements', category: 'Robot Parts & Construction', amount: 800,
   pay_to: 'Vendor directly', needed_by: '2026-11-20', certified: true })])).rows[0].id;
@@ -101,7 +113,8 @@ await fails(B1, `insert into public.request_approvals (request_id, user_id, appr
 // Pay.
 await fails(B1, `select public.mark_request_paid($1, '2026-08-01', 'Cash')`, [reqP], /Pick how/, 'pay method must be a known one');
 await fails(B1, `select public.mark_request_paid($1, '2026-08-01', null)`, [reqP], /Pick how/, 'pay method required');
-await as(B1, `select public.mark_request_paid($1, '2026-08-01', 'Check', '1042')`, [reqP]);
+await fails(B2, `select public.mark_request_paid($1, '2026-08-01', 'Check', '1042')`, [reqP], /not allowed for your role/, 'board members do not pay');
+await as(B3, `select public.mark_request_paid($1, '2026-08-01', 'Check', '1042')`, [reqP]);
 await as(B1, `select public.mark_request_paid($1, '2026-11-01', 'Zelle', 'ZC77')`, [reqR]);
 const st = (await db.query(`select id, status, pay_method, pay_ref from public.team_requests where id in ($1, $2) order by id`, [reqP, reqR])).rows;
 ok(st.find((r) => r.id === reqP).status === 'Receipts Due' && st.find((r) => r.id === reqR).status === 'Paid', 'P goes to Receipts Due, R to Paid');
@@ -116,7 +129,7 @@ ok(/^RC-/.test(rc), 'team adds a receipt');
 await fails(C, `select public.add_team_receipt($1, 'x', 1, null, 'a.pdf', 'team/T-9255/a.pdf')`, [otherIds[0]], /only to your team/, 'no receipts on other teams');
 
 // Decline needs a reason.
-const reqD = (await as(B1, `insert into public.team_requests (team_id, type, purpose, amount, submitted) values ('T-9255', 'Pre-Approval', 'Trip', 50, current_date) returning id`)).rows[0].id;
+const reqD = (await as(B2, `select public.request_save($1) id`, [JSON.stringify({ team_id: 'T-9255', type: 'Pre-Approval', purpose: 'Trip', amount: 50 })])).rows[0].id;
 await fails(B1, `select public.decline_request($1, ' ')`, [reqD], /reason/, 'decline needs a reason');
 await as(B1, `select public.decline_request($1, 'Not a team cost')`, [reqD]);
 ok((await db.query(`select status, decline_reason from public.team_requests where id = $1`, [reqD])).rows[0].decline_reason === 'Not a team cost', 'decline records reason');
@@ -156,14 +169,15 @@ const p2 = (await as(C, `select public.team_portal() p`)).rows[0].p;
 ok(p2.gifts.some((g) => g.amount == 120 && g.in_transit), 'team sees its gift in transit');
 
 // Month lock.
-const bs = (await as(B1, `insert into public.bank_statements (month) values ('2026-08-01') returning id`)).rows[0].id;
+const bs = (await as(B1, `select public.bank_statement_add('2026-08-01') id`)).rows[0].id;
 // The difference is worked out in the database: the page's own figure is not trusted.
 const off = Number((await as(B1, `select public.bank_month_difference($1, 0) d`, [bs])).rows[0].d);
 await fails(B1, `select public.lock_bank_month($1, $2, 0)`, [bs, 3.5 - off], /\$0\.00/, 'cannot lock with a difference, whatever the page sends');
 await as(B1, `select public.lock_bank_month($1, $2, 0)`, [bs, -off]);
-await fails(B1, `insert into public.ledger (date, dir, amount, fund_id) values ('2026-08-15', 'in', 5, 'F-GEN')`, [], /locked/, 'locked month refuses new rows');
-await fails(B1, `update public.ledger set amount = amount + 1 where request_id = $1`, [reqP], /locked/, 'locked month refuses edits');
-await as(B1, `insert into public.ledger (date, dir, amount, fund_id, memo) values ('2026-09-01', 'in', 5, 'F-GEN', 'correction')`);
+await fails(B1, `select public.ledger_add($1)`, [JSON.stringify({ date: '2026-08-15', dir: 'in', amount: 5, fund_id: 'F-GEN' })], /locked/, 'locked month refuses new rows');
+await fails(B1, `update public.ledger set amount = amount + 1 where request_id = $1`, [reqP], /permission denied/, 'ledger takes no direct writes');
+await fails(B1, `select public.ledger_edit((select id from public.ledger where request_id = $1 limit 1), '{"memo":"x"}')`, [reqP], /locked/, 'locked month refuses edits');
+await as(B1, `select public.ledger_add($1)`, [JSON.stringify({ date: '2026-09-01', dir: 'in', amount: 5, fund_id: 'F-GEN', memo: 'correction' })]);
 ok(true, 'open month accepts a correction');
 
 // Outsider (signed in, not invited) sees nothing.
@@ -172,7 +186,8 @@ ok((await as(X, `select count(*)::int n from public.team_requests`)).rows[0].n =
 await fails(X, `select public.team_portal()`, [], /Team sign-in/, 'outsider has no team portal');
 
 // Clear sample data still runs (the locked month's sample rows stay, the lock holds).
-await db.exec(`delete from public.bank_statements`);
+await import('./test-money.mjs').then((m) => m.run({ db, as, fails, ok, B1, B2, B3, C, bs, reqP }));
+await db.exec(`select set_config('gpric.via', 'unlock', false); update public.bank_statements set locked_at = null; select set_config('gpric.via', '', false);`);
 const cl = (await as(B1, `select public.clear_sample_data() c`)).rows[0].c;
 ok(cl.ledger > 0, 'clear sample data runs ' + JSON.stringify(cl));
 

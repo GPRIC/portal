@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { Page } from '@/components/shell';
-import { removeFiles, uploadFile, useData } from '@/components/data';
+import { rpc, uploadFile, useData } from '@/components/data';
 import { Area, DateIn, DocOpen, Err, FilePick, Foot, orNull, Select, Txt } from '@/components/forms';
 import { Badge, Check, Kv, Modal, Pills, Seg, Table, useUI, type Col, type Tone } from '@/components/ui';
 import { supabase } from '@/lib/supabase/client';
@@ -73,15 +73,15 @@ function DocForm({ id }: { id?: string }) {
     const row = { title: f.title.trim() || (file_name || 'Document'), type: f.type, date: f.date || null, linked_to: f.linked_to || null, public: f.public, link: orNull(f.link), file_path, file_name, notes: orNull(f.notes) };
     const ok = await run(() => (old ? supabase().from('documents').update(row).eq('id', old.id) : supabase().from('documents').insert({ ...row, added_by: me })), old ? 'Saved' : 'Document added');
     setBusy(false);
-    if (ok === false) { if (file) await removeFiles([file_path]); return; }
-    if (old?.file_path && old.file_path !== file_path) await removeFiles([old.file_path]);
+    if (ok === false) return;
     ui.close();
   };
   const del = async () => {
     if (!old) return;
-    if (!(await ui.confirm({ title: 'Delete Document', body: <>Delete {old.title}?{old.file_path ? ' The uploaded file is removed too.' : ''}</>, ok: 'Delete', danger: true }))) return;
-    const ok = await run(() => supabase().from('documents').delete().eq('id', old.id), 'Document deleted');
-    if (ok !== false) { await removeFiles([old.file_path]); ui.close(); }
+    const why = await ui.ask({ title: 'Archive Document', body: <>Take {old.title} off the register? The file is kept.</>, ok: 'Archive', danger: true });
+    if (!why) return;
+    const ok = await run(() => rpc('archive_record', { p_table: 'documents', p_id: old.id, p_reason: why }), 'Document archived');
+    if (ok !== false) ui.close();
   };
   return (
     <Modal wide title={old ? old.title : 'Add Document'} foot={<Foot onDelete={old ? del : undefined} onSave={save} busy={busy} extra={old && (old.file_path || old.link) ? <DocOpen doc={old} label="Open Document" /> : null} />}>

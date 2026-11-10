@@ -155,10 +155,25 @@ export function Steps({ list }: { list: [StepState, string, string?][] }) {
   );
 }
 
-export function Warnings({ list }: { list: string[] }) {
+export function Warnings({ list, blocks }: { list: string[]; blocks?: boolean }) {
   if (!list.length) return null;
-  return <div className="full warn">{list.map((w, i) => <div key={i}>{w}</div>)}<div className="muted" style={{ marginTop: 4 }}>This is a warning only. You can still save.</div></div>;
+  return <div className="full warn">{list.map((w, i) => <div key={i}>{w}</div>)}<div className="muted" style={{ marginTop: 4 }}>{blocks ? 'This will be blocked. Only the Treasurer can override it, with a reason.' : 'This is a warning only. You can still save.'}</div></div>;
 }
+
+/** A modal that asks for a reason (archive, reverse, unlock, override). Resolves to the trimmed text, or null on cancel. */
+function AskModal({ o, done }: { o: AskOpts; done: (v: string | null) => void }) {
+  const [v, setV] = useState(o.initial || '');
+  const ok = v.trim().length > 0 || o.optional;
+  return (
+    <Modal title={o.title} onClose={() => done(null)}
+      foot={<><button className="btn" onClick={() => done(null)}>Cancel</button><button className={'btn ' + (o.danger ? 'dan' : 'pri')} disabled={!ok} onClick={() => done(v.trim())}>{o.ok}</button></>}>
+      {o.body ? <div className="full" style={{ lineHeight: 1.55 }}>{o.body}</div> : null}
+      <div className="full"><label className="muted" style={{ fontSize: 12 }}>{o.label || 'Reason'}</label>
+        <textarea className="in" rows={3} autoFocus value={v} onChange={(e) => setV(e.target.value)} placeholder={o.placeholder} /></div>
+    </Modal>
+  );
+}
+export type AskOpts = { title: string; body?: ReactNode; ok: string; label?: string; placeholder?: string; danger?: boolean; optional?: boolean; initial?: string };
 
 /* ---------- modal + toast host ---------- */
 type UICtx = {
@@ -166,6 +181,8 @@ type UICtx = {
   close: () => void;
   toast: (msg: string, bad?: boolean) => void;
   confirm: (o: { title: string; body: ReactNode; ok: string; danger?: boolean }) => Promise<boolean>;
+  /** Asks for a reason; null when cancelled. */
+  ask: (o: AskOpts) => Promise<string | null>;
 };
 const Ctx = createContext<UICtx | null>(null);
 export function useUI() {
@@ -194,12 +211,16 @@ export function UIProvider({ children }: { children: ReactNode }) {
       </Modal>
     )]);
   }), []);
+  const ask = useCallback((o: AskOpts) => new Promise<string | null>((resolve) => {
+    const done = (v: string | null) => { setStack((s) => s.slice(0, -1)); resolve(v); };
+    setStack((s) => [...s, <AskModal key={'a' + Date.now()} o={o} done={done} />]);
+  }), []);
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape') setStack((s) => s.slice(0, -1)); };
     document.addEventListener('keydown', k);
     return () => document.removeEventListener('keydown', k);
   }, []);
-  const value = useMemo(() => ({ open, close, toast, confirm }), [open, close, toast, confirm]);
+  const value = useMemo(() => ({ open, close, toast, confirm, ask }), [open, close, toast, confirm, ask]);
   return (
     <Ctx.Provider value={value}>
       <HostCtx.Provider value={{ stack, toastMsg }}>{children}</HostCtx.Provider>

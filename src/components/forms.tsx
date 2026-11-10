@@ -35,7 +35,7 @@ export function FundSelect({ value, onChange, balances, blank }: { value: string
   const { db, calc } = useData();
   return (
     <Select value={value} onChange={onChange} blank={blank}
-      options={db.funds.slice().sort((a, b) => a.name.localeCompare(b.name)).map((f) => [f.id, f.name + (balances ? ' · ' + money(calc.fundBalance(f.id)) : '')])} />
+      options={db.funds.filter((f) => !f.archived_at || f.id === value).slice().sort((a, b) => a.name.localeCompare(b.name)).map((f) => [f.id, f.name + (balances ? ' · ' + money(calc.fundBalance(f.id)) : '')])} />
   );
 }
 
@@ -59,12 +59,12 @@ export function FilePick({ file, onFile, path, name, onRemove, accept }: {
   return <input className="in" type="file" accept={accept} onChange={(e) => onFile(e.target.files?.[0] || null)} />;
 }
 
-/** Footer: Delete on the left, Cancel and the main button on the right. */
-export function Foot({ onDelete, onSave, saveLabel = 'Save', busy, extra }: { onDelete?: () => void; onSave?: () => void; saveLabel?: string; busy?: boolean; extra?: ReactNode }) {
+/** Footer: Archive (or Reverse) on the left, Cancel and the main button on the right. Nothing is deleted. */
+export function Foot({ onDelete, deleteLabel = 'Archive', onSave, saveLabel = 'Save', busy, extra }: { onDelete?: () => void; deleteLabel?: string; onSave?: () => void; saveLabel?: string; busy?: boolean; extra?: ReactNode }) {
   const ui = useUI();
   return (
     <>
-      <span>{onDelete ? <button type="button" className="btn dan" onClick={onDelete} disabled={busy}>Delete</button> : null}</span>
+      <span>{onDelete ? <button type="button" className="btn dan" onClick={onDelete} disabled={busy}>{deleteLabel}</button> : null}</span>
       <span className="btnrow">
         <button type="button" className="btn" onClick={ui.close}>Cancel</button>
         {extra}
