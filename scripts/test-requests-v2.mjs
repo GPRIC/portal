@@ -78,7 +78,8 @@ ok((await one(K, `select public.can_file_direct()`)) === true, 'bookkeeper can f
 ok((await one(O, `select public.can_file_direct()`)) === true, 'an officer the Treasurer marked can file');
 ok((await one(B, `select public.can_file_direct()`)) === false, 'an ordinary board member cannot file');
 await fails(B, `select public.direct_expense_file($1)`, [de()], /Only the Treasurer, the bookkeeper/, 'board member is refused');
-await fails(C, `select public.direct_expense_file($1)`, [de()], /Only the Treasurer, the bookkeeper/, 'team user is refused');
+await fails(C, `select public.direct_expense_file($1)`, [de()], /Filing a direct expense is not allowed for your role/, 'team user is refused by require_role');
+await fails({ role: 'anon' }, `select public.direct_expense_file($1)`, [de()], /not allowed for your role|permission denied/, 'signed-out caller is refused');
 await fails(T, `insert into public.team_requests (type, charge_fund_id, purpose, amount) values ('Direct Expense', 'F-GEN', 'x', 1)`, [], /permission denied/, 'no direct insert');
 
 // Validation.
@@ -220,6 +221,61 @@ await fails(B, `select public.request_link_replacement($1, $2)`, [x2, x1], /Only
 await as(B, `select public.request_link_replacement($1, $2)`, [x1, x2]);
 ok((await req(x1)).replaced_by_id === x2 && (await req(x2)).replaces_id === x1, 'linking a separate replacement sets both ways');
 await fails(B, `select public.request_link_replacement($1, $2)`, [x1, many], /already replaced/, 'a request is replaced once');
+
+// ---------------------------------------------------------------- History roll back cannot undo a refunded payment
+
+const ha = await one(B, `select public.request_save($1)`, [JSON.stringify({ team_id: 'T-9255', type: 'Pre-Approval', purpose: 'Roll back probe A', amount: 100 })]);
+await as(T, `select public.approve_request($1)`, [ha]);
+await as(K, `select public.mark_request_paid($1, '2026-10-25', 'Check', '9001')`, [ha]);
+const rfA = await one(K, `select public.request_refund($1, 30, '2026-10-28', 'Returned')`, [ha]);
+const balA = await bal('F-9255');
+const paidLogA = (await q(`select id from public.change_log where tbl = 'team_requests' and record_id = $1 and action = 'Paid'`, [ha]))[0].id;
+await fails(T, `select public.rollback_change($1, 'test')`, [paidLogA], /refund recorded/, 'rolling back the payment of a refunded request is refused');
+const payA = (await outRows(ha)).filter((l) => !l.reversed_by_id);
+ok((await req(ha)).status === 'Receipts Due' && payA.length === 1 && (await bal('F-9255')) === balA, 'payment and refund both still stand, fund unchanged');
+await fails(T, `select public.ledger_reverse($1, 'test')`, [payA[0].id], /refund recorded|Undo it from the request/, 'the payment cannot be reversed by hand either');
+await fails(B, `select public.request_cancel($1, 'test')`, [ha], /not yet paid|payment in the ledger/, 'a refunded request cannot be cancelled');
+const rfLogA = (await q(`select id from public.change_log where tbl = 'request_refunds' and record_id = $1`, [rfA]))[0].id;
+await fails(T, `select public.rollback_change($1, 'test')`, [rfLogA], /fixed once recorded/, 'the refund row is not rolled back on its own');
+const rfLedA = (await q(`select id from public.change_log where tbl = 'ledger' and (after ->> 'request_id') = $1 and (after ->> 'source') = 'Refund'`, [ha]))[0].id;
+await fails(T, `select public.rollback_change($1, 'test')`, [rfLedA], /payment on the request/, 'the refund ledger row is not rolled back on its own');
+await fails({ role: 'postgres' }, `update public.team_requests set status = 'Approved' where id = '${ha}'`, [], /refund recorded|status changes only/, 'even the owner cannot step a refunded request back');
+
+// ---------------------------------------------------------------- History roll back cannot un-cancel a reordered request
+
+const hb = await one(T, `select public.direct_expense_file($1)`, [de({ purpose: 'Roll back probe B', charge_fund_id: 'F-GEN', pay_method: 'Debit Card', pay_ref: null, invoices: [{ vendor: 'Sample Vendor', amount: 50 }] })]);
+const cb = await one(T, `select public.request_cancel($1, 'mistake', true)`, [hb.id]);
+const cLogB = (await q(`select id from public.change_log where tbl = 'team_requests' and record_id = $1 and action = 'Cancelled' order by id desc`, [hb.id]))[0].id;
+await fails(T, `select public.rollback_change($1, 'test')`, [cLogB], /stays cancelled/, 'rolling back a cancel that was reordered is refused');
+const hbR = await req(hb.id);
+ok(hbR.status === 'Cancelled' && hbR.replaced_by_id === cb.replacement, 'the original stays cancelled and linked');
+await fails(K, `select public.direct_expense_review($1)`, [hb.id], /not waiting for review/, 'the original cannot be reviewed alongside its replacement');
+const linkLog = (await q(`select id from public.change_log where tbl = 'team_requests' and record_id = $1 order by id desc limit 1`, [x1]))[0].id;
+await fails(T, `select public.rollback_change($1, 'test')`, [linkLog], /never removed|stays cancelled/, 'a separately linked replacement cannot be unlinked by roll back');
+ok((await req(x1)).replaced_by_id === x2, 'the separate link stands');
+// A plain cancel (no replacement) can still be rolled back.
+const hd = await one(B, `select public.request_save($1)`, [JSON.stringify({ team_id: 'T-9255', type: 'Pre-Approval', purpose: 'Roll back probe D', amount: 20 })]);
+await as(T, `select public.approve_request($1)`, [hd]);
+await as(B, `select public.request_cancel($1, 'off')`, [hd]);
+const dLog = (await q(`select id from public.change_log where tbl = 'team_requests' and record_id = $1 and action = 'Cancelled'`, [hd]))[0].id;
+await as(T, `select public.rollback_change($1, 'test')`, [dLog]);
+ok((await req(hd)).status === 'Approved', 'a plain cancel rolls back to where it was');
+
+// ---------------------------------------------------------------- direct expense review passes the team spending rules
+
+const big = Math.round(((await bal('F-9255')) + 1000) * 100) / 100;
+const hc = await one(O, `select public.direct_expense_file($1)`, [de({ purpose: 'Roll back probe C', invoices: [{ vendor: 'Sample Big Vendor', amount: big }] })]);
+ok(Array.isArray(hc.warnings) && hc.warnings.length > 0, 'filing an overspend warns');
+await fails(K, `select public.direct_expense_review($1)`, [hc.id], /Blocked: .*overspend/, 'review of an overspend on a team fund is blocked');
+await fails(K, `select public.direct_expense_review($1, 'because')`, [hc.id], /Only the Treasurer can override/, 'the bookkeeper cannot override');
+await fails(B, `select public.direct_expense_review($1, 'because')`, [hc.id], /not allowed for your role/, 'a board member cannot review with an override');
+await fails(T, `select public.direct_expense_review($1)`, [hc.id], /not allowed for your role/, 'the Treasurer reviews only with an override reason');
+await as(T, `select public.direct_expense_review($1, 'Grant money arriving next week')`, [hc.id]);
+const ovC = await q(`select action, fund_id, reason from public.money_overrides where record_id = $1`, [hc.id]);
+ok((await req(hc.id)).status === 'Reviewed' && ovC.length >= 1 && ovC[0].action === 'review' && ovC[0].fund_id === 'F-9255', 'the Treasurer override posts it and is recorded');
+const hg = await one(T, `select public.direct_expense_file($1)`, [de({ purpose: 'Roll back probe G', charge_fund_id: 'F-GEN', pay_method: 'Debit Card', pay_ref: null, invoices: [{ vendor: 'Sample Office', amount: 12 }] })]);
+await as(K, `select public.direct_expense_review($1)`, [hg.id]);
+ok(num(await one(T, `select count(*) from public.money_overrides where record_id = $1`, [hg.id])) === 0, 'GPRIC General needs no team spending check');
 
 // ---------------------------------------------------------------- team users see only their own team
 

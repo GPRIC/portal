@@ -139,6 +139,58 @@ create trigger ledger_one_payment
   before insert on public.ledger
   for each row execute function public.ledger_one_payment();
 
+-- History roll back (and any other path) cannot leave the books inconsistent:
+--   a refunded request stays paid (its refund money is in the ledger against that payment);
+--   a cancelled request that was reordered stays cancelled (otherwise both it and its replacement could be paid);
+--   a replacement link, once made, is never removed.
+-- Only an admin fix or the sample clear bypasses this.
+create or replace function public.request_link_guard()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if coalesce(current_setting('gpric.via', true), '') in ('admin','clear_sample') then return new; end if;
+  if old.status in ('Paid','Receipts Due','Closed','Reviewed') and new.status not in ('Paid','Receipts Due','Closed','Reviewed')
+     and exists (select 1 from public.request_refunds f where f.request_id = old.id and f.archived_at is null) then
+    raise exception 'Request % has a refund recorded; a refunded request stays paid', old.id using errcode = '42501';
+  end if;
+  if old.status = 'Cancelled' and new.status <> 'Cancelled' and old.replaced_by_id is not null then
+    raise exception 'Request % was reordered as %; it stays cancelled', old.id, old.replaced_by_id using errcode = '42501';
+  end if;
+  if (old.replaced_by_id is not null and new.replaced_by_id is distinct from old.replaced_by_id)
+     or (old.replaces_id is not null and new.replaces_id is distinct from old.replaces_id) then
+    raise exception 'A replacement link is never removed' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+create trigger team_requests_link_guard
+  before update on public.team_requests
+  for each row execute function public.request_link_guard();
+
+-- The payment of a refunded request is never reversed (a roll back of the payment, or a reversal by any other path).
+create or replace function public.ledger_refund_guard()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if coalesce(current_setting('gpric.via', true), '') not in ('admin','clear_sample')
+     and old.reversed_by_id is null and new.reversed_by_id is not null
+     and old.request_id is not null and old.dir = 'out' and old.reverses_id is null
+     and exists (select 1 from public.request_refunds f where f.request_id = old.request_id and f.archived_at is null) then
+    raise exception 'Request % has a refund recorded; a refunded request stays paid', old.request_id using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+create trigger ledger_refund_guard
+  before update on public.ledger
+  for each row execute function public.ledger_refund_guard();
+
+revoke all on function public.request_link_guard() from public, anon, authenticated;
+revoke all on function public.ledger_refund_guard() from public, anon, authenticated;
 revoke all on function public.request_type_guard() from public, anon, authenticated;
 revoke all on function public.approval_type_guard() from public, anon, authenticated;
 revoke all on function public.receipt_type_guard() from public, anon, authenticated;
@@ -212,7 +264,9 @@ declare
   v_team text;
   i jsonb;
 begin
-  if not public.can_file_direct() then
+  perform public.require_role(array['treasurer','bookkeeper','board'], 'Filing a direct expense');
+  if public.my_role() = 'board'
+     and not exists (select 1 from public.portal_access a where a.user_id = auth.uid() and a.files_direct) then
     raise exception 'Only the Treasurer, the bookkeeper and officers the Treasurer names can file a direct expense' using errcode = '42501';
   end if;
   perform public.via('request');
@@ -252,7 +306,10 @@ $$;
 
 -- The bookkeeper's review: posts the direct expense to its fund's ledger as already paid (one row for the whole
 -- request, dated the day it was paid). Returns the ledger id.
-create or replace function public.direct_expense_review(p_request_id text)
+-- Charged to a team fund, it passes the same spending rules as paying a team request (spend_check, category
+-- 'Robotics Teams'): a broken rule blocks it unless the Treasurer reviews it with an override reason, which is logged.
+-- GPRIC General gets only the checks every ledger entry gets.
+create or replace function public.direct_expense_review(p_request_id text, p_override text default null)
 returns text
 language plpgsql
 security definer
@@ -264,18 +321,28 @@ declare
   v_cat text;
   v_led text;
   v_files int;
+  v_team text;
+  v_teamfund boolean;
 begin
-  perform public.require_role(array['bookkeeper'], 'Reviewing a direct expense');
+  if nullif(trim(coalesce(p_override, '')), '') is null then
+    perform public.require_role(array['bookkeeper'], 'Reviewing a direct expense');
+  else
+    perform public.require_role(array['bookkeeper','treasurer'], 'Reviewing a direct expense');
+  end if;
   perform public.via('review');
   select * into r from public.team_requests where id = p_request_id for update;
   if r.id is null or r.archived_at is not null then raise exception 'Request not found'; end if;
   if r.type <> 'Direct Expense' then raise exception 'Only a direct expense is reviewed'; end if;
   if r.status <> 'Submitted' then raise exception 'This direct expense is not waiting for review'; end if;
   v_date := coalesce(r.purchase_date, r.submitted, current_date);
-  v_cat := coalesce(r.category,
-                    case when exists (select 1 from public.funds f where f.id = r.charge_fund_id and f.team_id is not null)
-                           or exists (select 1 from public.teams t where t.fund_id = r.charge_fund_id)
-                         then 'Robotics Teams' else 'Administration' end);
+  select coalesce(f.team_id, (select t.id from public.teams t where t.fund_id = f.id order by t.id limit 1)) into v_team
+    from public.funds f where f.id = r.charge_fund_id;
+  v_teamfund := v_team is not null
+                and r.charge_fund_id is distinct from (select s.general_fund_id from public.settings s where s.id = 1);
+  if v_teamfund then
+    perform public.spend_check(r.charge_fund_id, r.amount, v_team, 'Robotics Teams', p_override, 'review', r.id);
+  end if;
+  v_cat := coalesce(r.category, case when v_teamfund then 'Robotics Teams' else 'Administration' end);
   select count(*) into v_files from public.receipts c where c.request_id = r.id and c.archived_at is null and c.file_path is not null;
   insert into public.ledger (date, dir, amount, fund_id, category, party, memo, request_id, receipt, receipt_path, receipt_name,
                              pay_method, pay_ref, sample)
@@ -733,7 +800,7 @@ do $$
 declare f text;
 begin
   foreach f in array array[
-    'public.can_file_direct()', 'public.direct_expense_file(jsonb)', 'public.direct_expense_review(text)',
+    'public.can_file_direct()', 'public.direct_expense_file(jsonb)', 'public.direct_expense_review(text, text)',
     'public.request_cancel(text,text,boolean)', 'public.request_link_replacement(text,text)',
     'public.request_refund(text,numeric,date,text,text)', 'public.portal_totals()', 'public.clear_sample_data()'] loop
     execute format('revoke all on function %s from public, anon', f);

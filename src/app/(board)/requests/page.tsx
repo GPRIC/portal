@@ -224,7 +224,7 @@ function Timeline({ r }: { r: TeamRequest }) {
 }
 
 function RequestView({ id }: { id: string }) {
-  const { calc, run, me, role, canPay, user } = useData();
+  const { calc, run, me, role, canPay, user, isTreasurer } = useData();
   const ui = useUI();
   const r = calc.request(id);
   const [rc, setRc] = useState({ vendor: '', amount: '', date: calc.today });
@@ -290,10 +290,20 @@ function RequestView({ id }: { id: string }) {
     if (!why) return;
     await run(() => rpc('decline_request', { p_request_id: r.id, p_reason: why }), 'Declined · the team sees the reason');
   };
+  // A direct expense on a team fund passes the same spending rules as paying a team request; the Treasurer can override.
+  const teamFund = !!fundId && fundId !== calc.db.settings.general_fund_id && calc.db.funds.some((f) => f.id === fundId && (f.team_id || calc.db.teams.some((x) => x.fund_id === f.id)));
+  const reviewWarn = teamFund && calc.needsReview(r) ? calc.spendWarnings(fundId!, r.amount, 'Robotics Teams') : [];
   const review = async () => {
-    const yes = await ui.confirm({ title: 'Mark Reviewed', body: <>Posts {money(r.amount, true)} to the {calc.fundName(fundId)} ledger as already paid ({[r.pay_method, r.pay_ref].filter(Boolean).join(' ')}). There is no reimbursement step.</>, ok: 'Mark Reviewed' });
-    if (!yes) return;
-    await run(() => rpc('direct_expense_review', { p_request_id: r.id }), 'Reviewed · posted to the fund ledger');
+    let override: string | null = null;
+    if (reviewWarn.length) {
+      if (!isTreasurer) { ui.toast('Blocked: ' + reviewWarn.join(' ') + ' Only the Treasurer can override.', true); return; }
+      override = await ui.ask({ title: 'Override A Money Rule', body: <>{reviewWarn.map((x, i) => <div key={i}>{x}</div>)}</>, ok: 'Override And Post', label: 'Why this is allowed' });
+      if (!override) return;
+    } else {
+      const yes = await ui.confirm({ title: 'Mark Reviewed', body: <>Posts {money(r.amount, true)} to the {calc.fundName(fundId)} ledger as already paid ({[r.pay_method, r.pay_ref].filter(Boolean).join(' ')}). There is no reimbursement step.</>, ok: 'Mark Reviewed' });
+      if (!yes) return;
+    }
+    await run(() => rpc('direct_expense_review', { p_request_id: r.id, p_override: override }), 'Reviewed · posted to the fund ledger');
   };
   const linkReplacement = async () => {
     const nid = await ui.ask({ title: 'Link Replacement', body: <>The request that replaces #{r.id}. Both requests show the link.</>, ok: 'Link', label: 'Request number', placeholder: 'e.g. ' + r.id });
@@ -323,7 +333,7 @@ function RequestView({ id }: { id: string }) {
     acts.push(canPay ? <button key="p" className="btn pri" onClick={() => ui.open(<PayForm id={r.id} />)}>Record Payment</button>
       : <span key="p" className="dis" title="The Treasurer or the bookkeeper records the payment"><button className="btn pri" disabled>Record Payment</button></span>);
   } else if (calc.needsReview(r)) {
-    acts.push(role === 'bookkeeper' ? <button key="v" className="btn pri" onClick={review}>Mark Reviewed</button>
+    acts.push(role === 'bookkeeper' || (isTreasurer && reviewWarn.length) ? <button key="v" className="btn pri" onClick={review}>{reviewWarn.length && isTreasurer ? 'Review With Override' : 'Mark Reviewed'}</button>
       : <span key="v" className="dis" title="The bookkeeper reviews direct expenses"><button className="btn pri" disabled>Mark Reviewed</button></span>);
   } else if (openReceipts && canPay) acts.push(<button key="rc" className="btn pri" onClick={complete}>Receipts Complete</button>);
   if (r.status === 'Cancelled' && !r.replaced_by_id) acts.push(<button key="l" className="btn" onClick={linkReplacement}>Link Replacement</button>);
