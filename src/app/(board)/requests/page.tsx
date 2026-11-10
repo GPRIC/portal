@@ -527,7 +527,7 @@ function InviteForm({ teamId }: { teamId?: string }) {
 }
 
 function TeamForm({ id }: { id?: string }) {
-  const { db, calc, run } = useData();
+  const { db, calc, run, isTreasurer } = useData();
   const ui = useUI();
   const old = id ? calc.team(id) : null;
   const [f, setF] = useState(() => ({
@@ -542,7 +542,9 @@ function TeamForm({ id }: { id?: string }) {
     const row = {
       name: f.name.trim(), short: f.short.trim(), program: orNull(f.program), level: orNull(f.level), season: orNull(f.season), pay_mode: f.pay_mode,
       ein: orNull(f.ein), school: orNull(f.school), students: f.students ? parseInt(f.students, 10) || null : null, affiliated: f.affiliated || null, blurb: orNull(f.blurb),
-      zeffy_name: orNull(f.zeffy_name), fund_id: f.newFund ? null : f.fund_id || null,
+      zeffy_name: orNull(f.zeffy_name),
+      // which fund pays for a team is the Treasurer's to change; others leave it as it is
+      ...(isTreasurer || !old ? { fund_id: f.newFund ? null : f.fund_id || null } : {}),
     };
     const res = await run(() => rpc('team_save', { p: { ...row, id: old?.id, new_fund: !old && f.newFund } }), old ? 'Team saved' : 'Team added');
     if (res !== false) ui.close();
@@ -564,7 +566,9 @@ function TeamForm({ id }: { id?: string }) {
       <Kv k="Season"><Txt value={f.season} onChange={(v) => set({ season: v })} /></Kv>
       <Kv k="Fund">
         {!old ? <Check checked={f.newFund} onChange={(v) => set({ newFund: v })}>Create a restricted fund for this team</Check> : null}
-        {!f.newFund ? <FundSelect value={f.fund_id} onChange={(v) => set({ fund_id: v })} blank="No fund" /> : null}
+        {f.newFund ? null : old && !isTreasurer
+          ? <>{calc.fundName(f.fund_id) || 'No fund'} <span className="muted">· only the Treasurer changes this</span></>
+          : <FundSelect value={f.fund_id} onChange={(v) => set({ fund_id: v })} blank="No fund" />}
       </Kv>
       <Kv k="Name In Zeffy"><Txt value={f.zeffy_name} onChange={(v) => set({ zeffy_name: v })} placeholder="The Fund name donors pick in Zeffy" /></Kv>
       <Kv k="Paid Through"><Seg value={f.pay_mode as (typeof TEAM_PAY)[number]} options={[...TEAM_PAY]} onChange={(v) => set({ pay_mode: v })} /></Kv>

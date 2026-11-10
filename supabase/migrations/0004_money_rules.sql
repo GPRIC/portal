@@ -386,7 +386,7 @@ begin
   end if;
   if f.restricted then
     if f.team_id is not null then
-      if p_team_id is distinct from f.team_id and coalesce(p_category, '') <> 'Robotics Teams' then
+      if p_team_id is distinct from f.team_id then
         v_rules := v_rules || format('%s is restricted to its own team', f.name);
       end if;
     else
@@ -427,7 +427,7 @@ begin
     w := w || format('%s has $%s left after other approved requests; paying this would overspend it. Payment will be blocked unless the Treasurer overrides.',
                      f.name, to_char(v_avail, 'FM999,999,990.00'));
   end if;
-  if f.restricted and f.team_id is not null and p_team_id is distinct from f.team_id and coalesce(p_category, '') <> 'Robotics Teams' then
+  if f.restricted and f.team_id is not null and p_team_id is distinct from f.team_id then
     w := w || format('%s is restricted to its own team.', f.name);
   elsif f.restricted and f.team_id is null then
     w := w || format('%s is restricted money: %s.', f.name, coalesce(f.purpose, 'check the gift terms'));
@@ -459,7 +459,10 @@ begin
   if v_amount is null or v_amount <= 0 then raise exception 'Amount must be more than zero'; end if;
   if v_fund is null then raise exception 'Pick a fund'; end if;
   if v_dir = 'out' then
-    perform public.spend_check(v_fund, v_amount, null, nullif(p ->> 'category', ''), p ->> 'override', 'ledger_add', null);
+    perform public.spend_check(v_fund, v_amount,
+      -- a board entry out of a team fund counts as spent on that team only when booked as Robotics Teams
+      case when p ->> 'category' = 'Robotics Teams' then (select f.team_id from public.funds f where f.id = v_fund) end,
+      nullif(p ->> 'category', ''), p ->> 'override', 'ledger_add', null);
   end if;
   insert into public.ledger (date, dir, amount, fund_id, source, category, party, memo, grant_id, donor_id,
                              receipt, receipt_path, receipt_name, pay_method, pay_ref)
@@ -641,6 +644,12 @@ begin
   perform public.require_role(array['treasurer','board','bookkeeper'], 'Assigning a gift to a fund');
   perform public.via('gift');
   if not exists (select 1 from public.funds where id = p_fund_id and archived_at is null) then raise exception 'Pick a fund'; end if;
+  -- moving a gift that already sits in a restricted fund changes what that money may pay for
+  if exists (select 1 from public.donations d join public.funds f on f.id = d.fund_id
+              where d.id = p_id and not coalesce(d.unassigned, false) and f.restricted and d.fund_id is distinct from p_fund_id)
+     and not public.is_treasurer() then
+    raise exception 'Only the Treasurer can move a gift out of a restricted fund' using errcode = '42501';
+  end if;
   update public.donations set fund_id = p_fund_id, unassigned = false where id = p_id and archived_at is null;
   if not found then raise exception 'Gift not found'; end if;
 end;
@@ -680,6 +689,9 @@ begin
   perform public.via('fund');
   if nullif(trim(p ->> 'name'), '') is null then raise exception 'Name the fund'; end if;
   if v_id is null then
+    if v_restricted and not public.is_treasurer() then
+      raise exception 'Only the Treasurer can make a restricted fund' using errcode = '42501';
+    end if;
     insert into public.funds (name, restricted, purpose, team_id)
     values (trim(p ->> 'name'), v_restricted, nullif(trim(p ->> 'purpose'), ''), nullif(p ->> 'team_id', ''))
     returning id into v_id;
@@ -689,6 +701,10 @@ begin
   if f.id is null then raise exception 'Fund not found'; end if;
   if f.restricted is distinct from v_restricted and not public.is_treasurer() then
     raise exception 'Only the Treasurer can change whether a fund is restricted' using errcode = '42501';
+  end if;
+  if p ? 'team_id' and f.team_id is distinct from nullif(p ->> 'team_id', '') and (f.restricted or v_restricted)
+     and not public.is_treasurer() then
+    raise exception 'Only the Treasurer can change which team a restricted fund belongs to' using errcode = '42501';
   end if;
   update public.funds set name = trim(p ->> 'name'), restricted = v_restricted, purpose = nullif(trim(p ->> 'purpose'), ''),
          team_id = case when p ? 'team_id' then nullif(p ->> 'team_id', '') else team_id end
@@ -723,6 +739,10 @@ begin
       returning id into v_fund;
     else
       v_fund := nullif(p ->> 'fund_id', '');
+      if v_fund is not null and not public.is_treasurer()
+         and exists (select 1 from public.funds f where f.id = v_fund and f.restricted and f.team_id is distinct from v_id) then
+        raise exception 'Only the Treasurer can give a team another team''s restricted fund' using errcode = '42501';
+      end if;
     end if;
     update public.teams set fund_id = v_fund where id = v_id;
     return v_id;
@@ -730,6 +750,10 @@ begin
   if p ? 'fund_id' and nullif(p ->> 'fund_id', '') is not null
      and not exists (select 1 from public.funds where id = p ->> 'fund_id' and archived_at is null) then
     raise exception 'Pick a fund';
+  end if;
+  if p ? 'fund_id' and nullif(p ->> 'fund_id', '') is distinct from (select t.fund_id from public.teams t where t.id = v_id)
+     and not public.is_treasurer() then
+    raise exception 'Only the Treasurer can change which fund pays for a team' using errcode = '42501';
   end if;
   update public.teams set name = trim(p ->> 'name'), short = trim(p ->> 'short'), program = nullif(p ->> 'program', ''),
          level = nullif(p ->> 'level', ''), season = nullif(p ->> 'season', ''), pay_mode = nullif(p ->> 'pay_mode', ''),
@@ -1168,23 +1192,22 @@ begin
 end;
 $$;
 
-alter function public.bank_month_difference(text, numeric) security definer;
-create or replace function public.bank_month_difference(p_statement_id text, p_ending numeric)
-returns numeric
+-- The month-end figures, the one place they are worked out: book balance, money out not yet cleared, Zeffy gifts in
+-- transit, and the bank balance those give. The Team Balances page shows these; lock_bank_month checks against them.
+create or replace function public.bank_month_figures(p_month date)
+returns jsonb
 language plpgsql
 stable
 security definer
 set search_path = ''
 as $$
 declare
-  v_end date;
+  v_end date := (date_trunc('month', p_month) + interval '1 month' - interval '1 day')::date;
   v_book numeric; v_out numeric; v_transit numeric;
 begin
   if not (public.is_board() or coalesce(public.my_role() = 'cpa', false)) then
     raise exception 'Board sign-in with two-step is required' using errcode = '42501';
   end if;
-  select (s.month + interval '1 month' - interval '1 day')::date into v_end from public.bank_statements s where s.id = p_statement_id;
-  if v_end is null then raise exception 'Statement not found'; end if;
   select coalesce(sum(case when l.dir = 'in' then l.amount else -l.amount end), 0) into v_book from public.ledger l where l.date <= v_end;
   -- money out not yet through the bank; an entry reversed by month end never reached the bank, so it and its reversal are left out
   select coalesce(sum(l.amount), 0) into v_out from public.ledger l
@@ -1195,7 +1218,27 @@ begin
                       where d.id = l.donation_id);
   select coalesce(sum(d.amount), 0) into v_transit from public.donations d
    where d.channel = 'Zeffy' and d.date <= v_end and (d.payout_date is null or d.payout_date > v_end) and d.archived_at is null;
-  return round(p_ending - (v_book + v_out - v_transit), 2);
+  return jsonb_build_object('book', round(v_book, 2), 'outstanding', round(v_out, 2), 'transit', round(v_transit, 2),
+                            'expected', round(v_book + v_out - v_transit, 2));
+end;
+$$;
+
+alter function public.bank_month_difference(text, numeric) security definer;
+create or replace function public.bank_month_difference(p_statement_id text, p_ending numeric)
+returns numeric
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare v_month date;
+begin
+  if not (public.is_board() or coalesce(public.my_role() = 'cpa', false)) then
+    raise exception 'Board sign-in with two-step is required' using errcode = '42501';
+  end if;
+  select s.month into v_month from public.bank_statements s where s.id = p_statement_id;
+  if v_month is null then raise exception 'Statement not found'; end if;
+  return round(p_ending - (public.bank_month_figures(v_month) ->> 'expected')::numeric, 2);
 end;
 $$;
 
@@ -1388,6 +1431,7 @@ create policy board_read on public.money_overrides for select to authenticated u
 
 -- Files are kept: nobody signed in can remove a file from the bucket.
 drop policy if exists board_files_delete on storage.objects;
+drop policy if exists board_files_update on storage.objects;
 
 -- ---------------------------------------------------------------- function grants
 
@@ -1396,7 +1440,7 @@ declare f text;
 begin
   foreach f in array array[
     'public.my_role()', 'public.is_treasurer()', 'public.require_role(text[],text)', 'public.my_name()', 'public.month_locked(date)',
-    'public.fund_balance(text)', 'public.fund_committed(text,text)', 'public.portal_totals()',
+    'public.fund_balance(text)', 'public.fund_committed(text,text)', 'public.portal_totals()', 'public.bank_month_figures(date)',
     'public.spend_warnings(text,numeric,text,text,text)',
     'public.ledger_add(jsonb)', 'public.ledger_edit(text,jsonb)', 'public.ledger_reverse(text,text,date)', 'public.ledger_correct(text,jsonb,text)',
     'public.gift_set_thanked(text[],boolean)', 'public.gift_assign_fund(text,text)', 'public.gift_archive(text,text)',

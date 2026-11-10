@@ -1,7 +1,7 @@
 'use client';
 // Monthly Reconciliation: the bank statement for a month, its lines matched to portal records, the workbook SOP
 // (bank ending balance = book balance + outstanding checks and Zelle − Zeffy payouts in transit), and the lock.
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { openFile, rpc, uploadFile, useData } from '@/components/data';
 import { Badge, Modal, Table, useUI, type Col } from '@/components/ui';
 import { Tip } from '@/components/tips';
@@ -44,7 +44,22 @@ export function ReconcilePanel({ month, setMonth }: { month: string; setMonth: (
   const [typed, setTyped] = useState<{ month: string; v: string } | null>(null);
   const shown = typed && typed.month === month ? typed.v : st?.ending_balance != null ? st.ending_balance.toFixed(2) : '';
   const bank = bankAmount(shown);
-  const rec = calc.reconcile(end, bank);
+  // The figures come from the database (bank_month_figures); calc only lists the items behind them for the tips.
+  const items = calc.reconcile(end);
+  const [fig, setFig] = useState<{ month: string; book: number; outstanding: number; transit: number; expected: number } | null>(null);
+  useEffect(() => {
+    let live = true;
+    rpc('bank_month_figures', { p_month: month }).then(({ data }) => {
+      if (live && data) setFig({ month, book: Number(data.book), outstanding: Number(data.outstanding), transit: Number(data.transit), expected: Number(data.expected) });
+    });
+    return () => { live = false; };
+  }, [month, db]);
+  const f = fig && fig.month === month ? fig : null;
+  const rec = {
+    outstanding: items.outstanding, transit: items.transit,
+    book: f?.book ?? 0, outstandingTotal: f?.outstanding ?? 0, transitTotal: f?.transit ?? 0, expected: f?.expected ?? 0,
+    difference: bank == null || !f ? null : Math.round((bank - f.expected) * 100) / 100,
+  };
   const lines = db.bank_lines.filter((b) => st && b.statement_id === st.id);
   const matched = lines.filter(isMatched).length;
   const due = reconcileDue(month);
@@ -66,7 +81,7 @@ export function ReconcilePanel({ month, setMonth }: { month: string; setMonth: (
     if (!yes) return;
     const s = await ensureStatement(month, st);
     if ('error' in s) { ui.toast(s.error, true); return; }
-    await run(() => rpc('lock_bank_month', { p_statement_id: s.id, p_ending: bank, p_difference: rec.difference }), monthName(month) + ' reconciled');
+    await run(() => rpc('lock_bank_month', { p_statement_id: s.id, p_ending: bank }), monthName(month) + ' reconciled');
   };
   const unlock = async () => {
     if (!st || !locked) return;

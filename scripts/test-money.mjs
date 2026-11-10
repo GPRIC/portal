@@ -68,6 +68,16 @@ export async function run({ db, as, fails, ok, B1, B2, B3, C, bs }) {
   ok(true, 'Treasurer spends restricted money with a reason');
   await fails(B3, `select public.fund_save($1)`, [JSON.stringify({ id: lease, name: 'Lease Money', restricted: false })], /Only the Treasurer/, 'only the Treasurer changes a restriction');
   await fails(B3, `select public.ledger_add($1)`, [JSON.stringify({ date: '2026-10-06', dir: 'out', amount: 999, fund_id: tiny, category: 'Space' })], /overspend/, 'ledger out blocked when it overspends');
+  // Who a restricted fund belongs to is the Treasurer's to change.
+  await fails(B3, `select public.team_save($1)`, [JSON.stringify({ id: team, name: 'Test Team', short: 'TT', fund_id: 'F-9255' })], /Only the Treasurer/, 'only the Treasurer points a team at another fund');
+  await fails(B3, `select public.team_save($1)`, [JSON.stringify({ name: 'Other Team', short: 'OT', new_fund: false, fund_id: 'F-9255' })], /Only the Treasurer/, 'a new team cannot take another team’s fund');
+  await fails(B3, `select public.fund_save($1)`, [JSON.stringify({ id: 'F-9255', name: (await one(B1, `select name from public.funds where id = 'F-9255'`)), restricted: true, team_id: team })], /Only the Treasurer/, 'only the Treasurer moves a team fund to another team');
+  await fails(B3, `select public.fund_save($1)`, [JSON.stringify({ name: 'Sneaky', restricted: true })], /Only the Treasurer/, 'only the Treasurer makes a restricted fund');
+  const tg = (await db.query(`select d.id from public.donations d join public.funds f on f.id = d.fund_id where f.restricted and not coalesce(d.unassigned, false) and d.archived_at is null limit 1`)).rows[0]?.id;
+  if (tg) await fails(B3, `select public.gift_assign_fund($1, 'F-GEN')`, [tg], /Only the Treasurer/, 'only the Treasurer moves a gift out of restricted money');
+  // Paying a request from another team's fund is blocked (no category gets round it).
+  const w = await one(B1, `select public.spend_warnings('F-9255', 1, $1, 'Robotics Teams')`, [team]);
+  ok(w.some((x) => /own team/.test(x)), 'another team’s fund warns at approval, whatever the category');
 
   // Reconciled months are fully locked; only the Treasurer unlocks, with a reason.
   await fails(B1, `select public.bank_lines_add($1, '[{"date":"2026-08-03","amount":1}]')`, [bs], /locked/, 'locked month refuses bank lines');
@@ -96,6 +106,8 @@ export async function run({ db, as, fails, ok, B1, B2, B3, C, bs }) {
   await db.exec(`insert into storage.objects (bucket_id, name) values ('board-files', 'receipts/keep.pdf')`);
   await as(B1, `delete from storage.objects where name = 'receipts/keep.pdf'`);
   ok((await db.query(`select count(*)::int n from storage.objects where name = 'receipts/keep.pdf'`)).rows[0].n === 1, 'files are never removed');
+  await as(B1, `update storage.objects set name = 'receipts/other.pdf' where name = 'receipts/keep.pdf'`);
+  ok((await db.query(`select count(*)::int n from storage.objects where name = 'receipts/keep.pdf'`)).rows[0].n === 1, 'files are never overwritten');
 
   // One set of totals.
   const tot = await one(B2, `select public.portal_totals()`);
@@ -103,6 +115,9 @@ export async function run({ db, as, fails, ok, B1, B2, B3, C, bs }) {
   ok(Number(gen.balance) === (await bal('F-GEN')), 'portal_totals matches the fund balance');
   ok(Math.abs(Number(tot.cash.total) - tot.funds.reduce((a, f) => a + Number(f.balance), 0)) < 0.005, 'cash total is the sum of funds');
   await fails(C, `select public.portal_totals()`, [], /Board sign-in/, 'team users get no board totals');
+  const fig = await one(B2, `select public.bank_month_figures('2026-08-01')`);
+  const dif = Number(await one(B2, `select public.bank_month_difference($1, 1000)`, [bs]));
+  ok(Math.abs(dif - (1000 - Number(fig.expected))) < 0.005 && Math.abs(Number(fig.expected) - (Number(fig.book) + Number(fig.outstanding) - Number(fig.transit))) < 0.005, 'one set of month-end figures');
 
   await fails(B3, `select public.clear_sample_data()`, [], /not allowed for your role/, 'only the Treasurer clears sample data');
 }

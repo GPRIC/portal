@@ -165,18 +165,14 @@ export class Calc {
     this.db.ledger.forEach((l) => { const d = this.donation(l.donation_id); if (d?.payout_date && payouts.has(d.payout_date)) ids.add(l.id); });
     return ids;
   }
-  /** What the bank should show at month end: book balance, plus money out not yet cleared, less Zeffy gifts still in transit. */
-  reconcile(monthEnd: string, bankEnding: number | null) {
-    const rows = this.db.ledger.filter((l) => l.date <= monthEnd);
-    const book = round2(sum(rows, (l) => (l.dir === 'in' ? l.amount : -l.amount)));
+  /** The items behind a month's figures, for the reconciliation tips: money out not yet cleared and Zeffy gifts in
+   *  transit. The figures themselves (book balance, totals, expected bank balance) come from bank_month_figures. */
+  reconcile(monthEnd: string) {
     const cleared = this.clearedIds();
-    // An entry reversed by month end never reached the bank, so it and its reversal are left out (as bank_month_difference does).
+    // An entry reversed by month end never reached the bank, so it and its reversal are left out (as bank_month_figures does).
     const reversedBy = (l: Ledger) => { const z = l.reversed_by_id ? this.db.ledger.find((x) => x.id === l.reversed_by_id) : null; return !!z && z.date <= monthEnd; };
     const outstanding = this.db.ledger.filter((l) => l.date <= monthEnd && l.dir === 'out' && !l.reverses_id && !reversedBy(l) && !cleared.has(l.id) && l.source !== 'Opening Balance');
-    const transit = this.inTransit(monthEnd);
-    const expected = round2(book + sum(outstanding, (l) => l.amount) - sum(transit, (d) => d.amount));
-    return { book, outstanding, outstandingTotal: round2(sum(outstanding, (l) => l.amount)), transit, transitTotal: round2(sum(transit, (d) => d.amount)),
-      expected, difference: bankEnding == null ? null : round2(bankEnding - expected) };
+    return { outstanding, transit: this.inTransit(monthEnd) };
   }
   /** The month a date falls in is reconciled and locked. */
   lockedMonth(iso: string) { return this.db.bank_statements.some((s) => s.locked_at && s.month === iso.slice(0, 7) + '-01'); }

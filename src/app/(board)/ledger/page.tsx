@@ -217,7 +217,7 @@ function FundForm({ id }: { id?: string }) {
   const { db, calc, run, isTreasurer } = useData();
   const ui = useUI();
   const old = id ? calc.fund(id) : null;
-  const [f, setF] = useState({ name: old?.name || '', restricted: old ? old.restricted : true, team_id: old?.team_id || '', purpose: old?.purpose || '' });
+  const [f, setF] = useState({ name: old?.name || '', restricted: old ? old.restricted : isTreasurer, team_id: old?.team_id || '', purpose: old?.purpose || '' });
   const [err, setErr] = useState<string | null>(null);
   const set = (p: Partial<typeof f>) => setF((x) => ({ ...x, ...p }));
   const used = old ? db.ledger.filter((l) => l.fund_id === old.id).length : 0;
@@ -225,7 +225,8 @@ function FundForm({ id }: { id?: string }) {
   const save = async () => {
     if (!f.name.trim()) { setErr('Name the fund.'); return; }
     if (old && old.restricted !== f.restricted && !isTreasurer) { setErr('Only the Treasurer can change whether a fund is restricted.'); return; }
-    const row = { id: old?.id, name: f.name.trim(), restricted: f.restricted, team_id: f.team_id || null, purpose: orNull(f.purpose) };
+    const teamLocked = !isTreasurer && !!old?.restricted;
+    const row = { id: old?.id, name: f.name.trim(), restricted: f.restricted, ...(teamLocked ? {} : { team_id: f.team_id || null }), purpose: orNull(f.purpose) };
     const ok = await run(() => rpc('fund_save', { p: row }), old ? 'Fund saved' : 'Fund added');
     if (ok !== false) ui.close();
   };
@@ -240,10 +241,12 @@ function FundForm({ id }: { id?: string }) {
   return (
     <Modal title={old ? old.name : 'Add Fund'} foot={<Foot onDelete={old ? del : undefined} onSave={save} />}>
       <Kv k="Name"><Txt value={f.name} onChange={(v) => set({ name: v })} autoFocus /></Kv>
-      <Kv k="Restricted">{old && !isTreasurer
+      <Kv k="Restricted">{!isTreasurer
         ? <>{f.restricted ? 'Restricted' : 'Unrestricted'} <span className="muted">· only the Treasurer changes this</span></>
         : <Check checked={f.restricted} onChange={(v) => set({ restricted: v })}>Money given for a set purpose</Check>}</Kv>
-      <Kv k="Team"><Select value={f.team_id} onChange={(v) => set({ team_id: v })} blank="Not a team fund" options={db.teams.map((t) => [t.id, t.name])} /></Kv>
+      <Kv k="Team">{!isTreasurer && old?.restricted
+        ? <>{calc.team(f.team_id)?.name || 'Not a team fund'} <span className="muted">· only the Treasurer changes this</span></>
+        : <Select value={f.team_id} onChange={(v) => set({ team_id: v })} blank="Not a team fund" options={db.teams.map((t) => [t.id, t.name])} />}</Kv>
       <Kv k="Purpose"><Area value={f.purpose} onChange={(v) => set({ purpose: v })} placeholder="What this money may be spent on" /></Kv>
       {old ? <Kv k="Balance">{money(calc.fundBalance(old.id))} · {used} entries</Kv> : null}
       <Err msg={err} />
