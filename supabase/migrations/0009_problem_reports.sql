@@ -109,6 +109,23 @@ grant usage on sequence public.problem_report_id_seq to authenticated;
 create policy problems_log_treasurer_only on public.change_log as restrictive for select to authenticated
   using (tbl <> 'problem_reports' or (select public.is_treasurer()));
 
+-- A team login reads its team's history through change_log_team, which filters on team_id only. A problem report's
+-- log rows never carry a team, so teammates never see each other's reports. Done with a trigger on the log rather
+-- than by redefining the shared log_team(), so later migrations that redefine log_team() cannot undo it.
+create or replace function public.change_log_no_problem_team()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if new.tbl = 'problem_reports' then new.team_id := null; end if;
+  return new;
+end;
+$$;
+revoke all on function public.change_log_no_problem_team() from public, anon, authenticated;
+create trigger change_log_no_problem_team before insert on public.change_log
+  for each row execute function public.change_log_no_problem_team();
+
 -- ---------------------------------------------------------------- files
 
 -- Anyone signed in uploads into their own problems/<user id>/ folder (no update or delete policy exists, so a file
@@ -116,6 +133,12 @@ create policy problems_log_treasurer_only on public.change_log as restrictive fo
 create policy problem_files_insert on storage.objects for insert to authenticated
   with check (bucket_id = 'board-files' and (storage.foldername(name))[1] = 'problems'
               and (storage.foldername(name))[2] = (select auth.uid())::text);
+
+-- Whatever else a role may upload (the board anywhere, 0001; a team under team/<its team>/, 0003), the problems/
+-- folder takes files only under the uploader's own user id. Restrictive, so it narrows every insert policy.
+create policy problem_files_own_folder on storage.objects as restrictive for insert to authenticated
+  with check (bucket_id is distinct from 'board-files' or (storage.foldername(name))[1] is distinct from 'problems'
+              or (storage.foldername(name))[2] = (select auth.uid())::text);
 
 -- The board reads the whole bucket except problem report files, which only the Treasurer opens.
 drop policy if exists board_files_select on storage.objects;

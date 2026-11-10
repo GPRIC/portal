@@ -23,15 +23,18 @@ async function fails(claims, sql, params, match, label) {
 const TRE = '00000000-0000-0000-0000-0000000000a1';
 const BRD = '00000000-0000-0000-0000-0000000000a2';
 const COACH = '00000000-0000-0000-0000-0000000000a3';
+const MATE = '00000000-0000-0000-0000-0000000000a4';
 const person = (sub, email) => ({ sub, email, aal: 'aal2', role: 'authenticated' });
 const T = person(TRE, 'treasurer@example.org');
 const B = person(BRD, 'director@example.org');
 const C = person(COACH, 'coach@example.org');
+const M = person(MATE, 'mate@example.org');
 
 await db.exec(`
-  insert into public.team_invites (team_id, email, name, role) values ('T-9255', 'coach@example.org', 'Casey Coach', 'Coach');
+  insert into public.team_invites (team_id, email, name, role) values ('T-9255', 'coach@example.org', 'Casey Coach', 'Coach'),
+    ('T-9255', 'mate@example.org', 'Morgan Mate', 'Treasurer');
   insert into auth.users (id, email, invited_at) values
-    ('${TRE}', 'treasurer@example.org', now()), ('${BRD}', 'director@example.org', now()), ('${COACH}', 'coach@example.org', now());
+    ('${TRE}', 'treasurer@example.org', now()), ('${BRD}', 'director@example.org', now()), ('${COACH}', 'coach@example.org', now()), ('${MATE}', 'mate@example.org', now());
   update public.portal_access set role = 'treasurer', name = 'Terry Treasurer' where user_id = '${TRE}';
   update public.portal_access set role = 'board', name = 'Dana Director' where user_id = '${BRD}';
 `);
@@ -67,6 +70,13 @@ ok((await as(B, `select count(*)::int n from public.change_log where tbl = 'prob
 ok((await as(T, `select count(*)::int n from public.change_log where tbl = 'problem_reports'`)).rows[0].n === 2, 'the Treasurer sees reports in the action log');
 ok((await as(B, `select count(*)::int n from public.change_log`)).rows[0].n > 0, 'the board still reads the rest of the action log');
 
+// A teammate on the same team never sees another login's report through the team's history view.
+ok((await db.query(`select team_id from public.team_users where user_id = $1`, [MATE])).rows[0]?.team_id === 'T-9255', 'a second login on the same team');
+ok((await db.query(`select count(*)::int n from public.change_log where tbl = 'problem_reports' and team_id is not null`)).rows[0].n === 0, 'problem report log rows carry no team');
+ok((await as(M, `select count(*)::int n from public.change_log_team where tbl = 'problem_reports'`)).rows[0].n === 0, 'a teammate gets 0 problem report rows from change_log_team');
+ok((await as(C, `select count(*)::int n from public.change_log_team where tbl = 'problem_reports'`)).rows[0].n === 0, 'the reporter gets none from change_log_team either');
+ok((await as(M, `select count(*)::int n from public.change_log_team`)).rows[0].n > 0, 'the team history still shows the team its other changes');
+
 // Only the Treasurer changes the status and reply; nothing else moves.
 const id = (await db.query(`select id from public.problem_reports where user_id = $1`, [COACH])).rows[0].id;
 await as(B, `update public.problem_reports set status = 'Fixed' where id = $1`, [id]);
@@ -90,14 +100,23 @@ catch (e) { ok(/never deleted/.test(e.message), 'even the owner cannot delete re
 await as(C, `insert into storage.objects (bucket_id, name) values ('board-files', 'problems/${COACH}/1-snip.png')`);
 await fails(C, `insert into storage.objects (bucket_id, name) values ('board-files', 'problems/${BRD}/x.png')`, [], /row-level security/, 'nobody uploads into someone else\'s folder');
 await as(B, `insert into storage.objects (bucket_id, name) values ('board-files', 'documents/board/minutes.pdf')`);
+await fails(B, `insert into storage.objects (bucket_id, name) values ('board-files', 'problems/${COACH}/fake.png')`, [], /row-level security/, 'a board member cannot upload into another person\'s problems folder');
+await fails(T, `insert into storage.objects (bucket_id, name) values ('board-files', 'problems/${BRD}/fake.png')`, [], /row-level security/, 'nor can the Treasurer');
+await fails(B, `insert into storage.objects (bucket_id, name) values ('board-files', 'problems/loose.png')`, [], /row-level security/, 'nobody uploads loose into problems/');
+await fails(C, `insert into storage.objects (bucket_id, name) values ('board-files', 'documents/x.pdf')`, [], /row-level security/, 'a team login still cannot upload outside its own folders');
+await as(B, `insert into storage.objects (bucket_id, name) values ('board-files', 'problems/${BRD}/own.png')`);
+await as(C, `insert into storage.objects (bucket_id, name) values ('board-files', 'team/T-9255/receipt.png')`);
+await as(B, `insert into storage.objects (bucket_id, name) values ('board-files', 'receipts/R-1/receipt.png')`);
+ok((await db.query(`select count(*)::int n from storage.objects where name in ('problems/${BRD}/own.png', 'team/T-9255/receipt.png', 'receipts/R-1/receipt.png')`)).rows[0].n === 3,
+  'own problems folder, team folder and other board paths still take uploads');
 const files = async (claims, like) => (await as(claims, `select count(*)::int n from storage.objects where name like $1`, [like])).rows[0].n;
-ok((await files(T, 'problems/%')) === 1, 'the Treasurer opens report files');
+ok((await files(T, 'problems/%')) === 2, 'the Treasurer opens report files');
 ok((await files(B, 'problems/%')) === 0, 'a board member cannot open report files');
 ok((await files(C, 'problems/%')) === 0, 'a team login cannot open report files, even its own');
 ok((await files(B, 'documents/%')) === 1, 'the board still opens its other files');
 await as(T, `update storage.objects set name = 'problems/x.png' where name like 'problems/%'`);
 await as(T, `delete from storage.objects where name like 'problems/%'`);
-ok((await db.query(`select count(*)::int n from storage.objects where name = 'problems/${COACH}/1-snip.png'`)).rows[0].n === 1, 'report files cannot be changed or removed');
+ok((await db.query(`select count(*)::int n from storage.objects where name like 'problems/%'`)).rows[0].n === 2, 'report files cannot be changed or removed');
 
 console.log(failed ? `\n${failed} check(s) failed` : '\nAll checks passed');
 process.exit(failed ? 1 : 0);
