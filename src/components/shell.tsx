@@ -12,6 +12,7 @@ import { DataProvider, useData } from './data';
 import { ROLE_LABEL } from '@/lib/types';
 import { Modal, UIHost, UIProvider, useUI } from './ui';
 import { TipsProvider } from './tips';
+import { Icon, ReportProblem } from './problems/report-problem';
 
 export const NAV: [string, string][] = [
   ['/dashboard', 'Dashboard'], ['/grants', 'Grants'], ['/donors', 'Donors'], ['/requests', 'Team Requests'],
@@ -59,7 +60,7 @@ export function ThemeToggle() {
 function TopBar() {
   const path = usePathname();
   const router = useRouter();
-  const { me, user, role } = useData();
+  const { me, user, role, isTreasurer } = useData();
   const signOut = async () => { await supabase().auth.signOut(); router.replace('/login'); router.refresh(); };
   return (
     <header className="top">
@@ -67,7 +68,10 @@ function TopBar() {
       <span className="area">Board</span>
       <nav className="nav" aria-label="Board pages">
         {NAV.map(([href, label]) => <Link key={href} href={href} className={path === href ? 'on' : ''}>{label}</Link>)}
+        {/* P37: Problem Reports is the Treasurer's only (row security too) */}
+        {isTreasurer ? <Link href="/problems" className={'lockd' + (path === '/problems' ? ' on' : '')} title="Only you see this page in the menu"><Icon.lock />Problem Reports</Link> : null}
       </nav>
+      <ReportProblem who={me} role={role ? ROLE_LABEL[role] : undefined} />
       <span className="chip who" tabIndex={0}>
         <span className="av grn">{initials(me)}</span><span className="who-name">{me}</span>
         {role ? <span className="muted who-role">{ROLE_LABEL[role]}</span> : null}
