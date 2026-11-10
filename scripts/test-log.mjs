@@ -87,6 +87,8 @@ export async function run({ db, as, fails, ok, B1, B2, B3, C }) {
   const named = tv.filter((r) => JSON.stringify([r.label, r.summary, r.before, r.after]).includes(anon.name));
   ok(tv.length > 0 && named.length === 0, `team rows never name an anonymous donor (${tv.length} gift rows)`);
   ok(tv.some((r) => /Anonymous/.test(r.label || '')), 'the anonymous gift shows as Anonymous');
+  ok(!tv.some((r) => JSON.stringify([r.reason, r.rollback_reason]).includes(anon.name)) &&
+     (await db.query(`select public.log_team_mask_text($1, $2) m`, ['Moved: gift from ' + anon.name, anon.name])).rows[0].m === 'Moved: gift from Anonymous', 'reasons are masked too');
   ok(!tv.some((r) => ['donor_id', 'grant_id', 'donation_id', 'zeffy_key'].some((k) => (r.before && k in r.before) || (r.after && k in r.after))), 'team rows carry no donor, gift, grant or Zeffy key links');
   const surname = anon.name.split(/\s+/).pop().toLowerCase();
   ok(!tv.some((r) => JSON.stringify([r.label, r.summary, r.before, r.after]).toLowerCase().includes(surname)), `the donor's surname appears in no team row, any case ("${surname}")`);
@@ -142,7 +144,15 @@ export async function run({ db, as, fails, ok, B1, B2, B3, C }) {
     await as(B1, `select public.complete_request_receipts($1)`, [open_.id]);
     const closed = await last(`tbl = 'team_requests' and record_id = $1 and (after ->> 'status') = 'Closed'`, [open_.id]);
     const booked = (await db.query(`select count(*)::int n from public.ledger where request_id = $1 and source = 'Unspent Returned'`, [open_.id])).rows[0].n;
-    if (booked) await fails(B1, `select public.rollback_change($1, 'x')`, [closed.id], /booked money/, 'rolling back a close that returned money is refused');
+    if (booked) {
+      await fails(B1, `select public.rollback_change($1, 'x')`, [closed.id], /booked money/, 'rolling back a close that returned money is refused');
+      const ret = (await db.query(`select c.id from public.change_log c join public.ledger l on l.id = c.record_id
+         where c.tbl = 'ledger' and c.before is null and l.request_id = $1 and l.source = 'Unspent Returned' order by c.id desc limit 1`, [open_.id])).rows[0];
+      await as(B1, `select public.rollback_change($1, 'Closed too early')`, [ret.id]);
+      ok(true, 'the returned money is reversed from History first');
+      await as(B1, `select public.rollback_change($1, 'Closed too early')`, [closed.id]);
+      ok((await db.query(`select status from public.team_requests where id = $1`, [open_.id])).rows[0].status !== 'Closed', 'then the close itself rolls back');
+    }
     else ok(true, 'close returned no money (nothing to double count)');
   } else ok(false, 'no paid request left to test closing');
   // A ledger description change that was edited again since is not overwritten.

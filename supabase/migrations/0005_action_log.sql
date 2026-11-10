@@ -412,8 +412,9 @@ begin
     perform public.unlock_bank_month(e.record_id, 'Roll back: ' || trim(p_reason));
 
   elsif e.tbl = 'ledger' then
-    if e.action in ('Added','Reversed') and e.before is null then
-      if e.after ->> 'request_id' is not null and e.after ->> 'reverses_id' is null then
+    if e.before is null then                      -- any entry added (by hand, a payment, a close, a reversal)
+      if e.after ->> 'request_id' is not null and e.after ->> 'reverses_id' is null
+         and coalesce(e.after ->> 'source', '') <> 'Unspent Returned' then   -- unspent money returned at a close is reversed here
         raise exception 'This entry is a request''s payment; roll back the payment on the request';
       end if;
       perform public.ledger_reverse(e.record_id, trim(p_reason));
@@ -547,7 +548,7 @@ as $$
   select case when j is null then null
               else (select coalesce(jsonb_object_agg(k, case when jsonb_typeof(v) = 'string' and p_anon is not null
                                                             then to_jsonb(public.log_team_mask_text(v #>> '{}', p_anon)) else v end), '{}'::jsonb)
-                      from jsonb_each(j - array['donor_id','grant_id','donation_id','zeffy_key']) e(k, v)) end;
+                      from jsonb_each(j - array['donor_id','grant_id','donation_id','zeffy_key','zeffy_id']) e(k, v)) end;
 $$;
 
 create view public.change_log_team with (security_barrier = true) as
@@ -556,7 +557,8 @@ select c.id, c.at, c.user_id, c.who, c.role, c.action, c.what, c.tbl, c.record_i
        public.log_team_mask_text(c.summary, a.name) as summary,
        public.log_team_mask(c.before, a.name) as before,
        public.log_team_mask(c.after, a.name) as after,
-       c.team_id, c.device, c.via, c.reason, c.rolls_back_id, c.rolled_back_at, c.rolled_back_by, c.rollback_reason
+       c.team_id, c.device, c.via, public.log_team_mask_text(c.reason, a.name) as reason, c.rolls_back_id, c.rolled_back_at, c.rolled_back_by,
+       public.log_team_mask_text(c.rollback_reason, a.name) as rollback_reason
   from public.change_log c
   left join lateral (
     select d.name from public.donors d
