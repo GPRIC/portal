@@ -21,15 +21,16 @@ const TONE: Record<string, Tone> = {
   Invited: 'blu', 'Signed In': 'gry', 'Signed Out': 'gry', Reversed: 'amb', 'Rolled Back': 'amb', Overrode: 'amb', 'Cleared Sample': 'gry',
 };
 const COLOR: Record<Tone, string> = { grn: 'var(--g)', blu: 'var(--blue)', red: 'var(--red)', vio: 'var(--vio)', amb: 'var(--amb)', gry: 'var(--t3)' };
-const WHATS = ['Ledger', 'Requests', 'Donations', 'Grants', 'Teams', 'Bank', 'Sign-ins', 'Settings', 'Accounts', 'Documents', 'Meetings'];
+const WHATS = ['Ledger', 'Requests', 'Donations', 'Grants', 'Teams', 'Bank', 'Sign-ins', 'Settings', 'Accounts', 'Documents', 'Meetings', 'Calendar', 'Problems'];
 const ACTIONS = ['Added', 'Changed', 'Archived', 'Restored', 'Deleted', 'Approved', 'Declined', 'Paid', 'Closed', 'Reversed', 'Locked', 'Unlocked',
   'Imported', 'Synced', 'Invited', 'Signed In', 'Signed Out', 'Rolled Back'];
 const RANGES: [string, string][] = [['7', 'Last 7 Days'], ['30', 'Last 30 Days'], ['all', 'All Time']];
 const SORTS: [keyof LogRow, string][] = [['at', 'When'], ['who', 'Who'], ['action', 'Action'], ['label', 'Record'], ['summary', 'What Changed']];
 const OPEN: Record<string, [string, string]> = {
-  Ledger: ['/ledger', 'Open In Ledger'], Requests: ['/requests', 'Open In Team Requests'], Donations: ['/donors', 'Open In Donors'],
+  Ledger: ['/ledger', 'Open In Ledger'], Requests: ['/requests', 'Open In Requests'], Donations: ['/donors', 'Open In Donors'],
   Grants: ['/grants', 'Open In Grants'], Teams: ['/balances', 'Open In Team Balances'], Bank: ['/balances', 'Open In Team Balances'],
   Accounts: ['/accounts', 'Open In Accounts'], Documents: ['/documents', 'Open In Documents'], Meetings: ['/meetings', 'Open In Meetings'],
+  Calendar: ['/calendar', 'Open In Calendar'], Problems: ['/problems', 'Open In Problem Reports'],
 };
 const ROLE: Record<string, string> = { treasurer: 'Treasurer', board: 'Board', bookkeeper: 'Bookkeeper', cpa: 'CPA', team: 'Team login', system: 'Automatic' };
 const HIDE = new Set(['sample', 'created_at']);
@@ -194,7 +195,7 @@ function FilterPop({ f, people, team, set, close }: { f: F; people: string[]; te
   return (
     <div className="hmenu" ref={ref}>
       {grp('Who', 'who', people, shortWho)}
-      {grp('What', 'what', team ? ['Requests', 'Donations', 'Teams', 'Ledger', 'Sign-ins'] : WHATS)}
+      {grp('What', 'what', team ? ['Requests', 'Donations', 'Teams', 'Ledger', 'Calendar', 'Sign-ins'] : WHATS)}
       {grp('Action', 'act', ACTIONS)}
       <div className="ft"><span className="muted">Nothing selected shows everything</span><span className="sp" />
         <button type="button" className="lnk" onClick={() => set({ who: [], what: [], act: [] })}>Reset</button></div>
