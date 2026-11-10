@@ -10,7 +10,7 @@ export default function Dashboard() {
   const { db, calc } = useData();
   const T = calc.today, c = calc.cash(), g = calc.grants(), src = calc.inBySource(), out = calc.outByCategory();
   const reqs = db.team_requests;
-  const team = (id: string) => calc.team(id)?.short || id;
+  const team = (id: string | null) => calc.team(id)?.short || id || 'GPRIC';
   const soon = (d: string | null) => !!d && d >= T && daysBetween(T, d) <= 30;
 
   const items: AttnItem[] = [];
@@ -20,6 +20,7 @@ export default function Dashboard() {
   });
   reqs.filter((r) => calc.isOverdue(r)).forEach((r) => items.push({ r: -1, d: sd(calc.receiptsDue(r)), tone: 'red', t1: team(r.team_id) + ': ' + r.purpose, t2: 'Receipts ' + calc.daysLate(r) + ' days overdue · team blocked', href: '/requests' }));
   reqs.filter((r) => calc.needsVote(r)).forEach((r) => items.push({ r: 5, d: 'Vote', tone: 'vio', t1: team(r.team_id) + ': ' + r.purpose, t2: 'Needs a board vote · ' + money(r.amount), href: '/requests' }));
+  reqs.filter((r) => calc.needsReview(r)).forEach((r) => items.push({ r: 5.5, d: 'Review', tone: 'blu', t1: calc.chargeTo(r) + ': ' + r.purpose, t2: 'Direct expense to review · ' + money(r.amount), href: '/requests' }));
   reqs.filter((r) => r.status === 'Approved').forEach((r) => items.push({ r: 6, d: 'Pay', tone: 'grn', t1: team(r.team_id) + ': ' + r.purpose, t2: 'Approved, not yet paid · ' + money(r.amount), href: '/requests' }));
   g.awarded.filter((x) => x.received < x.awarded).forEach((x) => items.push({ r: 7, d: 'Pending', tone: 'amb', t1: x.funder, t2: money(x.awarded - x.received) + ' awarded, not yet received', href: '/grants' }));
   const renew = db.accounts.filter((a) => soon(a.renewal));

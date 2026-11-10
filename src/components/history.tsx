@@ -17,12 +17,12 @@ export type LogRow = {
 
 const TONE: Record<string, Tone> = {
   Added: 'grn', Changed: 'blu', Deleted: 'red', Archived: 'red', Restored: 'grn', Approved: 'vio', Voted: 'vio', Declined: 'red',
-  Paid: 'grn', Closed: 'gry', Cancelled: 'red', Refunded: 'amb', Locked: 'gry', Unlocked: 'amb', Imported: 'amb', Synced: 'amb',
+  Paid: 'grn', Closed: 'gry', Cancelled: 'red', Refunded: 'amb', Reviewed: 'blu', Locked: 'gry', Unlocked: 'amb', Imported: 'amb', Synced: 'amb',
   Invited: 'blu', 'Signed In': 'gry', 'Signed Out': 'gry', Reversed: 'amb', 'Rolled Back': 'amb', Overrode: 'amb', 'Cleared Sample': 'gry',
 };
 const COLOR: Record<Tone, string> = { grn: 'var(--g)', blu: 'var(--blue)', red: 'var(--red)', vio: 'var(--vio)', amb: 'var(--amb)', gry: 'var(--t3)' };
 const WHATS = ['Ledger', 'Requests', 'Donations', 'Grants', 'Teams', 'Bank', 'Sign-ins', 'Settings', 'Accounts', 'Documents', 'Meetings', 'Calendar', 'Problems'];
-const ACTIONS = ['Added', 'Changed', 'Archived', 'Restored', 'Deleted', 'Approved', 'Declined', 'Paid', 'Closed', 'Reversed', 'Locked', 'Unlocked',
+const ACTIONS = ['Added', 'Changed', 'Archived', 'Restored', 'Deleted', 'Approved', 'Declined', 'Paid', 'Reviewed', 'Cancelled', 'Refunded', 'Closed', 'Reversed', 'Locked', 'Unlocked',
   'Imported', 'Synced', 'Invited', 'Signed In', 'Signed Out', 'Rolled Back'];
 const RANGES: [string, string][] = [['7', 'Last 7 Days'], ['30', 'Last 30 Days'], ['all', 'All Time']];
 const SORTS: [keyof LogRow, string][] = [['at', 'When'], ['who', 'Who'], ['action', 'Action'], ['label', 'Record'], ['summary', 'What Changed']];

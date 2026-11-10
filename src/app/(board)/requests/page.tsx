@@ -1,152 +1,250 @@
 'use client';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Page } from '@/components/shell';
 import { rpc, uploadFile, useData } from '@/components/data';
 import { Amount, Area, DateIn, Err, FileLink, Foot, FundSelect, num, orNull, Select, str, Txt } from '@/components/forms';
-import { Badge, Card, Check, Kv, Lines, Modal, Pills, Seg, St, Steps, Table, useUI, Warnings, type Col, type Tone } from '@/components/ui';
+import { Badge, Check, Kv, Lines, Modal, Seg, Table, useUI, Warnings, type Col, type Tone } from '@/components/ui';
 import { Tip } from '@/components/tips';
-import { date, money, round2, sd, sum } from '@/lib/format';
-import { PAY_METHODS, PAY_TO, REQUEST_CATEGORIES, REQUEST_TYPES, type PayMethod, type RequestType, type Team, type TeamRequest } from '@/lib/types';
+import { date, initials, money, round2, sd, sum } from '@/lib/format';
+import { DIRECT_PAY, PAY_METHODS, PAY_TO, REQUEST_CATEGORIES, REQUEST_TYPES, type PayMethod, type RequestType, type Team, type TeamRequest } from '@/lib/types';
 import type { Calc } from '@/lib/calc';
+import './requests.css';
 
 /** How a team's money reaches it (the team record, not a request). */
 const TEAM_PAY = ['Team EIN Account', 'School / District'] as const;
-
-const ICON: Record<string, ReactNode> = {
-  eye: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg>,
-  check: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>,
-  pay: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>,
-  rcpt: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 2h14v20l-3-2-2 2-2-2-2 2-2-2-3 2z" /><path d="M9 7h6M9 11h6M9 15h4" /></svg>,
-  gear: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>,
-};
+const GEAR = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>;
 
 const isR = (r: TeamRequest) => r.type === 'Reimbursement';
+const isD = (r: TeamRequest) => r.type === 'Direct Expense';
 const forText = (r: TeamRequest) => (isR(r) ? [r.vendor, r.category].filter(Boolean).join(' · ') || r.purpose : r.purpose);
 const requestor = (r: TeamRequest) => r.requestor_name || r.created_by || '';
+const TEAM_TYPES = REQUEST_TYPES.filter((x) => x !== 'Direct Expense');
+const TYPE_DOT: Record<RequestType, string> = { 'Direct Expense': 'var(--vio)', Reimbursement: 'var(--t3)', 'Pre-Approval': 'var(--blue)' };
+const TYPE_TIP: Record<RequestType, string> = {
+  'Direct Expense': 'The board already paid this by debit card or check',
+  Reimbursement: 'The team is paid back by Zelle',
+  'Pre-Approval': 'Approved before the team spends; receipts follow',
+};
+const UNPAID = ['Draft', 'Submitted', 'Board Vote', 'Approved'];
+const PAIDS = ['Paid', 'Reviewed', 'Closed', 'Receipts Due'];
+
+function TypeDot({ r, label = true }: { r: TeamRequest; label?: boolean }) {
+  return <span className="rq-ty" title={TYPE_TIP[r.type]}><i style={{ background: TYPE_DOT[r.type] }} />{label ? r.type : null}</span>;
+}
 function TypeBadge({ r }: { r: TeamRequest }) {
-  return isR(r) ? <Badge tone="blu">Reimbursement</Badge> : <Badge tone="vio">Pre-Approval</Badge>;
+  return isD(r) ? <Badge tone="vio">Direct Expense</Badge> : isR(r) ? <Badge tone="blu">Reimbursement</Badge> : <Badge tone="gry">Pre-Approval</Badge>;
 }
 
-function Approvals({ r }: { r: TeamRequest }) {
-  const { calc } = useData();
-  if (r.status === 'Declined') return null;
-  const got = calc.approvalsFor(r.id), n = calc.needed(r);
-  const who = got.map((a) => a.approver_name + ' ' + sd(a.approved_at.slice(0, 10))).join(', ');
-  const tip = (who ? 'Approved by ' + who + '. ' : 'No approvals yet. ') + (got.length < n && calc.needsVote(r) ? 'Needs ' + (n - got.length) + ' more; not ' + (requestor(r) || 'the requestor') + (got.length ? ' or ' + got.map((a) => a.approver_name).join(' or ') : '') + '.' : '');
-  const tone: Tone = got.length >= n ? 'grn' : got.length ? 'amb' : 'gry';
-  return <span title={tip}><Badge tone={tone}>{got.length + ' of ' + n}</Badge></span>;
+function tone(calc: Calc, r: TeamRequest): Tone {
+  if (r.status === 'Receipts Due') return calc.isOverdue(r) ? 'red' : 'amb';
+  return ({ Submitted: 'amb', 'Board Vote': 'amb', Approved: 'vio', Paid: 'grn', Closed: 'grn', Reviewed: 'blu', Cancelled: 'gry', Declined: 'red', Draft: 'gry' } as Record<string, Tone>)[r.status] || 'gry';
 }
+function statusTip(calc: Calc, r: TeamRequest): string {
+  const base: Record<string, string> = {
+    Draft: 'Not sent yet',
+    Submitted: isD(r) ? 'Waiting for the bookkeeper to review' : 'Waiting on the board',
+    'Board Vote': 'Waiting on a board vote',
+    Approved: isR(r) ? 'Approved, waiting for the Zelle payment' : 'Approved, waiting for payment',
+    Paid: 'Paid back by the Treasurer',
+    'Receipts Due': calc.isOverdue(r) ? 'Paid; receipts ' + calc.daysLate(r) + ' days overdue' : 'Paid; receipts due ' + sd(calc.receiptsDue(r)),
+    Closed: 'Paid and receipts are in',
+    Reviewed: 'Checked by the bookkeeper and posted to the fund ledger as already paid',
+    Cancelled: 'Withdrawn before payment. Nothing posted to the books.' + (r.cancel_reason ? ' ' + r.cancel_reason : ''),
+    Declined: 'Turned down by the board' + (r.decline_reason ? ': ' + r.decline_reason : ''),
+  };
+  const rf = calc.refundFor(r.id);
+  return [base[r.status] || r.status,
+    rf ? 'Refund ' + money(rf.amount, true) + ' on ' + sd(rf.date) : '',
+    r.replaced_by_id ? 'Replaced by #' + r.replaced_by_id : '',
+    r.replaces_id ? 'Replaces #' + r.replaces_id : ''].filter(Boolean).join('. ');
+}
+function StBadge({ r }: { r: TeamRequest }) {
+  const { calc } = useData();
+  return <span title={statusTip(calc, r)}><Badge tone={tone(calc, r)}>{r.status === 'Receipts Due' && calc.isOverdue(r) ? 'Receipts Overdue' : r.status}</Badge></span>;
+}
+function Filer({ r }: { r: TeamRequest }) {
+  const n = requestor(r) || '—';
+  return <span className="who-line"><span className={'av ' + (r.team_id && r.submitted_by_user ? 'blu' : 'grn')}>{initials(n)}</span>{n}</span>;
+}
+const netCost = (calc: Calc, r: TeamRequest) => round2(r.amount - (calc.refundFor(r.id)?.amount || 0));
+
+type Main = 'Needs Action' | 'Paid' | 'Cancelled' | 'Declined' | 'All';
+const MAIN: [Main, Tone, string][] = [
+  ['Needs Action', 'amb', 'Submitted requests waiting on approval or the bookkeeper\'s review, approved requests waiting on payment, and paid pre-approvals still collecting receipts'],
+  ['Paid', 'grn', 'Paid back, closed, or reviewed and posted as already paid'],
+  ['Cancelled', 'gry', 'Withdrawn before payment'],
+  ['Declined', 'red', 'Turned down by the board'],
+  ['All', 'gry', 'Every request'],
+];
+const inMain = (m: Main, r: TeamRequest) => (m === 'All' ? true
+  : m === 'Needs Action' ? ['Submitted', 'Board Vote', 'Approved', 'Receipts Due'].includes(r.status)
+  : m === 'Paid' ? ['Paid', 'Reviewed', 'Closed'].includes(r.status)
+  : r.status === m);
+type TypeF = 'All' | RequestType;
+type SortK = 'date' | 'purpose' | 'charge' | 'amount' | 'status' | 'filer';
+const SORTS: [SortK, string][] = [['date', 'Date'], ['purpose', 'Purpose'], ['charge', 'Charge To'], ['amount', 'Amount'], ['status', 'Status'], ['filer', 'Filed By']];
 
 export default function RequestsPage() {
   const { db, calc } = useData();
   const ui = useUI();
-  const [filt, setFilt] = useState('Needs Approval');
-  const P: [string, Tone, (r: TeamRequest) => boolean][] = [
-    ['Needs Approval', 'vio', (r) => calc.needsVote(r)],
-    ['To Pay', 'grn', (r) => r.status === 'Approved'],
-    ['Receipts Open', 'amb', (r) => calc.isOpenReceipts(r)],
-    ['Overdue', 'red', (r) => calc.isOverdue(r)],
-    ['Paid', 'grn', (r) => r.status === 'Closed' || (r.status === 'Paid' && isR(r))],
-    ['Declined', 'red', (r) => r.status === 'Declined'],
-    ['All', 'gry', () => true],
-  ];
+  const [main, setMain] = useState<Main>('Needs Action');
+  const [type, setType] = useState<TypeF>('All');
+  const [q, setQ] = useState('');
+  const [menu, setMenu] = useState(false);
+  const [page, setPage] = useState(0);
+  const [per, setPer] = useState(25);
+  const [sort, setSort] = useState<{ k: SortK; asc: boolean }>({ k: 'date', asc: false });
+
   const all = db.team_requests.filter((r) => r.status !== 'Draft');
-  const team = (r: TeamRequest) => calc.team(r.team_id);
-  const na = all.filter(P[0][2]), pay = all.filter(P[1][2]), open = all.filter(P[2][2]), late = all.filter(P[3][2]);
-  const second = na.filter((r) => calc.approvalsFor(r.id).length).length;
-  const fn = (P.find((p) => p[0] === filt) || P[0])[2];
-  const act = (r: TeamRequest): [string, string, () => void] => {
-    if (calc.needsVote(r)) return ['check', 'Approve or decline', () => ui.open(<ApproveForm id={r.id} />)];
-    if (r.status === 'Approved') return ['pay', 'Mark paid', () => ui.open(<PayForm id={r.id} />)];
-    if (calc.isOpenReceipts(r)) return ['rcpt', 'Receipts', () => ui.open(<RequestView id={r.id} />)];
-    return ['eye', 'Open', () => ui.open(<RequestView id={r.id} />)];
+  const ql = q.trim().toLowerCase();
+  const hay = (r: TeamRequest) => [r.id, r.purpose, r.vendor, r.category, calc.chargeTo(r), requestor(r), r.status, r.type, ...calc.receiptsFor(r.id).map((x) => x.vendor)].filter(Boolean).join(' ').toLowerCase();
+  const rows = all.filter((r) => inMain(main, r) && (type === 'All' || r.type === type) && (!ql || hay(r).includes(ql)));
+  const key = (r: TeamRequest): string | number => {
+    switch (sort.k) {
+      case 'date': return r.submitted || '';
+      case 'purpose': return r.purpose.toLowerCase();
+      case 'charge': return calc.chargeTo(r).toLowerCase();
+      case 'amount': return r.amount;
+      case 'status': return r.status;
+      default: return requestor(r).toLowerCase();
+    }
   };
-  const cols: Col<TeamRequest>[] = [
-    { k: 'id', label: 'Request' },
-    { k: 'type', label: 'Type', html: (r) => <TypeBadge r={r} /> },
-    { k: 'team', label: 'Team', sv: (r) => team(r)?.short, html: (r) => team(r)?.short },
-    { k: 'requestor', label: 'Requestor', sv: requestor, html: requestor },
-    { k: 'for', label: 'For', sv: forText, html: forText },
-    { k: 'amount', label: 'Amount', num: true, html: (r) => money(r.amount) },
-    { k: 'submitted', label: 'Submitted', html: (r) => sd(r.submitted) },
-    { k: 'status', label: 'Status', html: (r) => (r.status === 'Declined' && r.decline_reason ? <span title={r.decline_reason}><St s={r.status} /></span> : <St s={r.status} />) },
-    { k: 'approvals', label: 'Approvals', sv: (r) => calc.approvalsFor(r.id).length / calc.needed(r), html: (r) => <Approvals r={r} /> },
-    { k: 'due', label: 'Receipts Due', sv: (r) => calc.receiptsDue(r) || 'z', html: (r) => {
-      if (calc.isOverdue(r)) return <span title={'Receipts were due ' + sd(calc.receiptsDue(r)) + '. ' + team(r)?.short + ' cannot submit new requests until they are in.'}><Badge tone="red">{calc.daysLate(r) + ' Days Overdue'}</Badge></span>;
-      if (calc.isOpenReceipts(r)) return date(calc.receiptsDue(r));
-      if (r.status === 'Closed') return <Badge tone="grn">Received</Badge>;
-      if (isR(r) && r.status !== 'Declined') return <span className="muted" title="Reimbursements arrive with their receipt">Attached</span>;
-      return '';
-    } },
-    { k: 'act', label: '', nosort: true, html: (r) => { const [i, l, f] = act(r); return <div className="rowacts"><button className="ib" title={l} aria-label={l} onClick={f}>{ICON[i]}</button></div>; } },
-  ];
-  const blocked = db.teams.filter((t) => calc.teamBlocked(t.id).length);
+  rows.sort((a, b) => { const x = key(a), y = key(b); return (x > y ? 1 : x < y ? -1 : a.id.localeCompare(b.id)) * (sort.asc ? 1 : -1); });
+  const pages = Math.max(1, Math.ceil(rows.length / per));
+  const pg = Math.min(page, pages - 1);
+  const shown = rows.slice(pg * per, pg * per + per);
+  const any = main !== 'Needs Action' || type !== 'All' || !!ql;
+  const clear = () => { setMain('Needs Action'); setType('All'); setQ(''); setPage(0); setMenu(false); };
+  const open = (r: TeamRequest) => ui.open(<RequestView id={r.id} />);
+  const cell = (r: TeamRequest, k: SortK): ReactNode => {
+    const rc = calc.receiptsFor(r.id);
+    const vend = [...new Set(rc.map((x) => x.vendor).filter(Boolean))];
+    switch (k) {
+      case 'date': return <span title={'Request #' + r.id + ', ' + date(r.submitted)}>{sd(r.submitted)}</span>;
+      case 'purpose': return <span className="rq-pr" title={[r.purpose, rc.length ? rc.length + (rc.length === 1 ? ' invoice' : ' invoices') : '', vend.join(', ') || r.vendor || ''].filter(Boolean).join(' · ')}><TypeDot r={r} label={false} /><span className="t">{forText(r)}</span></span>;
+      case 'charge': return calc.chargeTo(r);
+      case 'amount': { const rf = calc.refundFor(r.id); return <span title={rf ? 'Net after refund: ' + money(netCost(calc, r), true) : undefined}>{money(r.amount, true)}</span>; }
+      case 'status': return <StBadge r={r} />;
+      default: return <Filer r={r} />;
+    }
+  };
+
   return (
-    <Page title="Team Requests" help="requests" actions={<>
+    <Page title="Requests" help="requests" actions={<>
       <Tip id="requests.rules" side="r" text="Approval Rules: set the dollar threshold and how many board approvals each side of it needs.">
-        <button className="ib" title="Approval Rules" aria-label="Approval Rules" onClick={() => ui.open(<RulesForm />)}>{ICON.gear}</button>
+        <button className="ib" title="Approval Rules" aria-label="Approval Rules" onClick={() => ui.open(<RulesForm />)}>{GEAR}</button>
       </Tip>
       <Tip id="requests.teams" side="r" text="Teams now lists each team's logins. Invite a coach or team treasurer from here; they submit requests from their own Team Portal.">
         <button className="btn" onClick={() => ui.open(<TeamsList />)}>Teams</button>
       </Tip>
-      <button className="btn pri" onClick={() => ui.open(<RequestForm />)}>New Request</button>
+      <button className="btn" onClick={() => ui.open(<RequestForm />)} title="Enter a team request on a team's behalf">New Request</button>
+      {db.canFileDirect
+        ? <button className="btn pri" onClick={() => ui.open(<DirectForm />)} title="Log a purchase the board already paid by debit card or check.">New Direct Expense</button>
+        : <span className="dis" title="Only the Treasurer, the bookkeeper and officers the Treasurer names can file these."><button className="btn pri" disabled>New Direct Expense</button></span>}
     </>}>
-      <div className="cards">
-        <Card n="Needs Approval" v={String(na.length)} color={na.length ? 'vio' : undefined}
-          tip={<Lines lines={[money(sum(na, (r) => r.amount)) + ' requested.', second + ' waiting on a further approval.', na.filter(isR).length + ' reimbursements, ' + na.filter((r) => !isR(r)).length + ' pre-approvals.']} />} />
-        <Card n="Approved, Not Paid" v={money(sum(pay, (r) => r.amount))} tip={<Lines lines={pay.map((r) => team(r)?.short + ': ' + forText(r) + ' ' + money(r.amount))} />} />
-        <Card n="Receipts Outstanding" v={money(sum(open, (r) => calc.outstanding(r)))}
-          tip={<Lines lines={[open.length + ' paid pre-approvals still collecting receipts.', ...open.map((r) => team(r)?.short + ': ' + money(calc.outstanding(r)) + ' due ' + sd(calc.receiptsDue(r)))]} />} />
-        <Card n="Teams Blocked" v={String(blocked.length)} color={blocked.length ? 'red' : 'g'}
-          tip={<Lines lines={late.map((r) => team(r)?.short + ': ' + r.purpose + ', ' + calc.daysLate(r) + ' days overdue')} none="No team is blocked." />} />
-      </div>
-      <div className="panel">
-        <Pills items={P.map(([k, tone, f]) => ({ key: k, label: k, tone, count: all.filter(f).length }))} active={filt} onPick={setFilt} />
-        <Table cols={cols} rows={all.filter(fn)} sort="submitted" dir={-1} onRow={(r) => ui.open(<RequestView id={r.id} />)} empty="No requests here." />
+      <div className="panel rq-panel">
+        <div className="rq-frow">
+          {MAIN.map(([m, t, tip]) => <button key={m} type="button" className={'rq-fp' + (main === m ? ' on ' + t : '')} title={tip} onClick={() => { setMain(m); setPage(0); }}>{m}</button>)}
+          <span className="sp" />
+          <FilterMenu open={menu} setOpen={setMenu} type={type} setType={(v) => { setType(v); setPage(0); }} />
+          <input className="in rq-srch" placeholder="Search" value={q} onChange={(e) => { setQ(e.target.value); setPage(0); }} />
+        </div>
+        <div className="scroll">
+          <table>
+            <thead><tr>{SORTS.map(([k, l]) => (
+              <th key={k} className={(k === 'amount' ? 'num ' : '') + (sort.k === k ? 'sort' : '')} onClick={() => { setSort((s) => (s.k === k ? { k, asc: !s.asc } : { k, asc: !(k === 'date' || k === 'amount') })); setPage(0); }}>
+                {l}{sort.k === k ? <span className="ar">{sort.asc ? '▲' : '▼'}</span> : null}
+              </th>
+            ))}</tr></thead>
+            <tbody>
+              {shown.length ? shown.map((r) => (
+                <tr key={r.id} className="rowlink" onClick={() => open(r)}>
+                  {SORTS.map(([k]) => <td key={k} className={k === 'amount' ? 'num' : undefined}>{cell(r, k)}</td>)}
+                </tr>
+              )) : (
+                <tr><td colSpan={SORTS.length} className="rq-empty"><b>Nothing here</b>No requests match. Try All, or clear the search.
+                  {any ? <div style={{ marginTop: 12 }}><button className="btn sm" onClick={clear}>Clear Filters</button></div> : null}
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="rq-pager">
+          <span className="muted">{rows.length ? `${pg * per + 1}–${Math.min(rows.length, pg * per + per)} of ${rows.length} requests · ${money(sum(rows, (r) => r.amount))}` : '0 requests'}</span>
+          <span className="sp" />
+          <span className="muted">Rows</span>
+          <div className="seg">{[25, 50, 100].map((n) => <button key={n} type="button" className={'opt' + (per === n ? ' on' : '')} onClick={() => { setPer(n); setPage(0); }}>{n}</button>)}</div>
+          <button className="btn sm" disabled={!pg} onClick={() => setPage(pg - 1)}>Previous</button>
+          <span className="muted">Page {pg + 1} of {pages}</span>
+          <button className="btn sm" disabled={pg >= pages - 1} onClick={() => setPage(pg + 1)}>Next</button>
+        </div>
       </div>
     </Page>
   );
 }
 
-function stepsFor(calc: Calc, r: TeamRequest): Parameters<typeof Steps>[0]['list'] {
-  const got = calc.approvalsFor(r.id), n = calc.needed(r), due = calc.receiptsDue(r);
-  const who = requestor(r);
-  const S: Parameters<typeof Steps>[0]['list'] = [['done', 'Submitted' + (who ? ' by ' + who : '') + (r.certified ? ' with the team certification' : ''), sd(r.submitted)]];
-  if (r.status === 'Declined') {
-    S.push(['no', 'Declined' + (r.declined_by ? ' by ' + r.declined_by : '') + ': ' + (r.decline_reason || ''), r.declined_at ? sd(r.declined_at.slice(0, 10)) : '']);
-    return S;
-  }
-  got.forEach((a, i) => S.push(['done', 'Approval ' + (i + 1) + ' of ' + n + ': ' + a.approver_name, sd(a.approved_at.slice(0, 10))]));
-  const legacy = !got.length && !calc.needsVote(r);
-  if (legacy) S.push(['done', 'Approved by the board', '']);
-  else for (let i = got.length; i < n; i++) {
-    S.push([i === got.length && calc.needsVote(r) ? 'now' : 'todo', 'Approval ' + (i + 1) + ' of ' + n + ': any board member except ' + (who || 'the requestor') + (got.length ? ' and ' + got.map((a) => a.approver_name).join(', ') : ''), '']);
-  }
-  const paid = !!r.paid_date;
-  S.push([paid ? 'done' : r.status === 'Approved' ? 'now' : 'todo',
-    paid ? 'Paid' + (r.pay_method ? ' by ' + r.pay_method : '') + (r.pay_ref ? ' · ' + r.pay_ref : '') : 'Paid ' + (isR(r) ? 'by Zelle' + (r.zelle_contact ? ' to ' + r.zelle_contact : '') : 'to ' + (r.pay_to || 'the team')),
-    paid ? sd(r.paid_date) : '']);
-  if (!isR(r)) {
-    const closed = r.status === 'Closed';
-    S.push([closed ? 'done' : paid ? (calc.isOverdue(r) ? 'late' : 'now') : 'todo', closed ? 'Receipts in' : calc.isOverdue(r) ? 'Receipts ' + calc.daysLate(r) + ' days overdue' : 'Receipts due within ' + calc.receiptDays + ' days', due ? sd(due) : '']);
-    S.push([closed ? 'done' : 'todo', 'Closed', r.receipts_done ? sd(r.receipts_done) : '']);
-  }
-  return S;
+function FilterMenu({ open, setOpen, type, setType }: { open: boolean; setOpen: (v: boolean) => void; type: TypeF; setType: (v: TypeF) => void }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const k = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', k);
+    return () => document.removeEventListener('mousedown', k);
+  }, [open, setOpen]);
+  return (
+    <span className="rq-fwrap" ref={ref}>
+      <button type="button" className={'rq-fp' + (open ? ' on gry' : '')} onClick={() => setOpen(!open)}>Filters{type !== 'All' ? <i className="rq-fdot" title="A filter is active" /> : null}</button>
+      {open ? (
+        <div className="rq-pop">
+          <span className="rq-lab">Type</span>
+          <Seg value={type} options={['All', ...REQUEST_TYPES]} onChange={setType} />
+          {type !== 'All' ? <button type="button" className="lnk" style={{ alignSelf: 'flex-start' }} onClick={() => setType('All')}>Reset Filters</button> : null}
+        </div>
+      ) : null}
+    </span>
+  );
+}
+
+/* ---------- one request ---------- */
+type InvRow = { id: string; vendor: string | null; date: string | null; file_path: string | null; file_name: string | null; amount: number };
+
+function Timeline({ r }: { r: TeamRequest }) {
+  const { calc } = useData();
+  const got = calc.approvalsFor(r.id);
+  const rf = calc.refundFor(r.id);
+  const ev: [string, string | null | undefined][] = [['Filed', r.submitted]];
+  if (got.length) ev.push(['Approved', got[got.length - 1].approved_at.slice(0, 10)]);
+  else if (!isD(r) && ['Approved', 'Paid', 'Receipts Due', 'Closed'].includes(r.status)) ev.push(['Approved', null]);
+  if (r.status === 'Declined') ev.push(['Declined', r.declined_at?.slice(0, 10)]);
+  if (r.paid_date) ev.push(['Paid', r.paid_date]);
+  if (r.reviewed_at) ev.push(['Reviewed', r.reviewed_at.slice(0, 10)]);
+  if (r.status === 'Cancelled') ev.push(['Cancelled', r.cancelled_at?.slice(0, 10)]);
+  if (rf) ev.push(['Refund', rf.date]);
+  return <span className="rq-tl">{ev.map(([l, d], i) => <span key={l} className="rq-fl">{i ? <span className="ar2">›</span> : null}{l}{d ? <span className="st">{sd(d)}</span> : null}</span>)}</span>;
 }
 
 function RequestView({ id }: { id: string }) {
-  const { calc, run, me, canPay } = useData();
+  const { calc, run, me, role, canPay, user, isTreasurer } = useData();
   const ui = useUI();
   const r = calc.request(id);
   const [rc, setRc] = useState({ vendor: '', amount: '', date: calc.today });
   const [file, setFile] = useState<File | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  if (!r) return <Modal title="Team Request"><div className="full empty">This request was archived.</div></Modal>;
+  if (!r) return <Modal title="Request"><div className="full empty">This request was archived.</div></Modal>;
   const t = calc.team(r.team_id);
   const receipts = calc.receiptsFor(r.id);
   const openReceipts = calc.isOpenReceipts(r);
   const member = calc.requestorMember(r);
+  const pay = calc.paymentFor(r.id);
+  const rf = calc.refundFor(r.id);
+  const fundId = calc.requestFundId(r);
+  const late = r.team_id ? calc.teamBlocked(r.team_id).filter((x) => x.id !== r.id) : [];
+  const inv: InvRow[] = receipts.length ? receipts
+    : isR(r) && (r.receipt_path || r.vendor) ? [{ id: 'r', vendor: r.vendor, date: r.purchase_date, file_path: r.receipt_path, file_name: r.receipt_name, amount: r.amount }] : [];
+  const vendors = [...new Set(inv.map((x) => x.vendor).filter(Boolean))].join(', ') || r.vendor || '';
+  const paid = !!r.paid_date && r.status !== 'Cancelled';
+  const before = UNPAID.includes(r.status) && !pay;
 
   const addReceipt = async () => {
     const a = num(rc.amount);
@@ -180,136 +278,320 @@ function RequestView({ id }: { id: string }) {
     if (!yes) return;
     await run(() => rpc('complete_request_receipts', { p_request_id: r.id, p_date: calc.today }), 'Request closed');
   };
-  // Only a draft or declined request is archived; anything approved or paid stays on record.
+  const approve = async () => {
+    const res = await run(() => rpc('approve_request', { p_request_id: r.id }));
+    if (res === false) return;
+    const o = res as { approvals: number; needed: number; status: string; warnings?: string[] };
+    if (o.warnings?.length) await ui.confirm({ title: o.status === 'Approved' ? 'Approved, With A Warning' : 'Approval Recorded, With A Warning', body: <>{o.warnings.map((w, i) => <div key={i}>{w}</div>)}</>, ok: 'OK' });
+    else ui.toast(o.status === 'Approved' ? 'Approved · ready to pay' : 'Approval ' + o.approvals + ' of ' + o.needed + ' recorded');
+  };
+  const decline = async () => {
+    const why = await ui.ask({ title: 'Decline Request #' + r.id, body: <>The team sees this reason.</>, ok: 'Decline', danger: true, label: 'Reason', placeholder: 'One line the team will see' });
+    if (!why) return;
+    await run(() => rpc('decline_request', { p_request_id: r.id, p_reason: why }), 'Declined · the team sees the reason');
+  };
+  // A direct expense on a team fund passes the same spending rules as paying a team request; the Treasurer can override.
+  const teamFund = !!fundId && fundId !== calc.db.settings.general_fund_id && calc.db.funds.some((f) => f.id === fundId && (f.team_id || calc.db.teams.some((x) => x.fund_id === f.id)));
+  const reviewWarn = teamFund && calc.needsReview(r) ? calc.spendWarnings(fundId!, r.amount, 'Robotics Teams') : [];
+  const review = async () => {
+    let override: string | null = null;
+    if (reviewWarn.length) {
+      if (!isTreasurer) { ui.toast('Blocked: ' + reviewWarn.join(' ') + ' Only the Treasurer can override.', true); return; }
+      override = await ui.ask({ title: 'Override A Money Rule', body: <>{reviewWarn.map((x, i) => <div key={i}>{x}</div>)}</>, ok: 'Override And Post', label: 'Why this is allowed' });
+      if (!override) return;
+    } else {
+      const yes = await ui.confirm({ title: 'Mark Reviewed', body: <>Posts {money(r.amount, true)} to the {calc.fundName(fundId)} ledger as already paid ({[r.pay_method, r.pay_ref].filter(Boolean).join(' ')}). There is no reimbursement step.</>, ok: 'Mark Reviewed' });
+      if (!yes) return;
+    }
+    await run(() => rpc('direct_expense_review', { p_request_id: r.id, p_override: override }), 'Reviewed · posted to the fund ledger');
+  };
+  const linkReplacement = async () => {
+    const nid = await ui.ask({ title: 'Link Replacement', body: <>The request that replaces #{r.id}. Both requests show the link.</>, ok: 'Link', label: 'Request number', placeholder: 'e.g. ' + r.id });
+    if (!nid) return;
+    await run(() => rpc('request_link_replacement', { p_cancelled: r.id, p_new: nid.replace(/^#/, '').trim() }), 'Linked');
+  };
   const canArchive = r.status === 'Draft' || r.status === 'Declined';
   const del = async () => {
-    const why = await ui.ask({ title: 'Archive Request', body: <>Archive {r.id}, {forText(r)}? It stays on record.</>, ok: 'Archive', danger: true });
+    const why = await ui.ask({ title: 'Archive Request', body: <>Archive #{r.id}, {forText(r)}? It stays on record.</>, ok: 'Archive', danger: true });
     if (!why) return;
     const ok = await run(() => rpc('archive_record', { p_table: 'team_requests', p_id: r.id, p_reason: why }), 'Request archived');
     if (ok !== false) ui.close();
   };
 
-  let act = null;
-  if (calc.needsVote(r)) act = <button className="btn pri" onClick={() => ui.open(<ApproveForm id={r.id} />)}>Review Approval</button>;
-  else if (r.status === 'Approved' && canPay) act = <button className="btn pri" onClick={() => ui.open(<PayForm id={r.id} />)}>Mark Paid</button>;
-  else if (openReceipts && canPay) act = <button className="btn pri" onClick={complete}>Receipts Complete</button>;
+  const acts: ReactNode[] = [];
+  if (before) acts.push(<button key="c" className="btn dan" onClick={() => ui.open(<CancelForm id={r.id} />)}>Cancel Request</button>);
+  if (paid && PAIDS.includes(r.status)) {
+    acts.push(rf
+      ? <span key="rf" className="dis" title="A refund is already recorded on this request"><button className="btn amb-btn" disabled>Record Refund</button></span>
+      : <button key="rf" className="btn amb-btn" onClick={() => ui.open(<RefundForm id={r.id} />)}>Record Refund</button>);
+  }
+  if (calc.needsVote(r)) {
+    const why = calc.cannotApprove(r, user.id, user.email);
+    acts.push(<button key="d" className="btn" onClick={decline}>Decline</button>);
+    acts.push(why ? <span key="a" className="dis" title={why}><button className="btn pri" disabled>Approve</button></span> : <button key="a" className="btn pri" onClick={approve}>Approve</button>);
+  } else if (r.status === 'Approved') {
+    acts.push(canPay ? <button key="p" className="btn pri" onClick={() => ui.open(<PayForm id={r.id} />)}>Record Payment</button>
+      : <span key="p" className="dis" title="The Treasurer or the bookkeeper records the payment"><button className="btn pri" disabled>Record Payment</button></span>);
+  } else if (calc.needsReview(r)) {
+    acts.push(role === 'bookkeeper' || (isTreasurer && reviewWarn.length) ? <button key="v" className="btn pri" onClick={review}>{reviewWarn.length && isTreasurer ? 'Review With Override' : 'Mark Reviewed'}</button>
+      : <span key="v" className="dis" title="The bookkeeper reviews direct expenses"><button className="btn pri" disabled>Mark Reviewed</button></span>);
+  } else if (openReceipts && canPay) acts.push(<button key="rc" className="btn pri" onClick={complete}>Receipts Complete</button>);
+  if (r.status === 'Cancelled' && !r.replaced_by_id) acts.push(<button key="l" className="btn" onClick={linkReplacement}>Link Replacement</button>);
+
+  const chips = <>
+    {r.replaces_id ? <button type="button" className="rq-lchip" onClick={() => ui.open(<RequestView id={r.replaces_id!} />)}>Linked: Replaces Request #{r.replaces_id}</button> : null}
+    {r.replaced_by_id ? <button type="button" className="rq-lchip" onClick={() => ui.open(<RequestView id={r.replaced_by_id!} />)}>Linked: Replaced By #{r.replaced_by_id}</button> : null}
+  </>;
 
   return (
-    <Modal wide title={r.id + ' · ' + forText(r)} foot={<>
-      <span className="btnrow">{canArchive ? <button className="btn dan" onClick={del}>Archive</button> : null}<button className="btn" onClick={() => ui.open(<RequestForm id={r.id} />)}>Edit</button></span>
-      <span className="btnrow"><button className="btn" onClick={ui.close}>Close</button>{act}</span>
+    <Modal wide title={'Request #' + r.id} foot={<>
+      <span className="btnrow">
+        <button className="btn" onClick={ui.close}>Close</button>{chips}
+        {canArchive ? <button className="btn dan" onClick={del}>Archive</button> : null}
+        {!isD(r) && before ? <button className="btn" onClick={() => ui.open(<RequestForm id={r.id} />)}>Edit</button> : null}
+      </span>
+      <span className="btnrow">{acts}</span>
     </>}>
-      <Kv k="Type"><TypeBadge r={r} /></Kv>
-      <Kv k="Team">{t?.name}</Kv>
-      <Kv k="Requestor">{requestor(r)}{member ? <> <span title="Cannot approve this request"><Badge>Board Member</Badge></span></> : null}{r.requestor_email ? <span className="muted"> · {r.requestor_email}</span> : null}</Kv>
-      <Kv k="Amount">{money(r.amount)}</Kv>
-      <Kv k="Category">{r.category}</Kv>
-      {isR(r) ? <>
-        <Kv k="Vendor">{r.vendor}</Kv>
-        <Kv k="Purchase Date">{r.purchase_date ? date(r.purchase_date) : ''}</Kv>
-        <Kv k="Receipt">{r.receipt_path ? <FileLink path={r.receipt_path} name={r.receipt_name} /> : ''}</Kv>
-        <Kv k="Zelle">{r.zelle_contact}</Kv>
-        {r.team_ledger_ref ? <Kv k="Team Ledger">{r.team_ledger_ref}</Kv> : null}
-      </> : <>
-        <Kv k="Purpose">{r.purpose}</Kv>
-        <Kv k="Needed By">{r.needed_by ? date(r.needed_by) : ''}</Kv>
-        <Kv k="Pay To">{(r.pay_to || '') + (r.vendor ? ' · ' + r.vendor : '')}</Kv>
-      </>}
-      <Kv k="Team Fund">{money(calc.fundBalance(t?.fund_id)) + ' balance'}</Kv>
-      <Kv k="Approvals"><Approvals r={r} /></Kv>
-      {r.paid_date ? <Kv k="Paid">{date(r.paid_date) + (r.pay_method ? ' · ' + r.pay_method : '') + (r.pay_ref ? ' · ' + r.pay_ref : '')}</Kv> : null}
-      {r.created_by ? <Kv k="Entered By">{r.created_by}</Kv> : null}
-      {r.notes ? <Kv k="Notes"><span className="wraptext">{r.notes}</span></Kv> : null}
-      {!isR(r) && (openReceipts || r.status === 'Closed') ? <Kv k="Receipts">{money(calc.receipted(r)) + ' receipted · ' + money(r.returned || 0) + ' returned · ' + money(Math.max(0, calc.outstanding(r))) + ' outstanding'}</Kv> : null}
-      {r.status === 'Declined' ? <div className="full sev red">Declined: {r.decline_reason}</div> : null}
-      <Steps list={stepsFor(calc, r)} />
-      {receipts.length || openReceipts ? (
+      <div className="full reqhead"><StBadge r={r} /><span className="muted">{money(r.amount, true)}</span></div>
+      <Kv k="Type"><TypeDot r={r} /></Kv>
+      <Kv k="Charge To">{calc.chargeTo(r)}<span className="muted"> · {money(calc.fundBalance(fundId))} balance</span></Kv>
+      <Kv k="Purpose">{r.purpose}</Kv>
+      <Kv k="Filed By"><span className="rq-fl"><Filer r={r} /><span className="muted">· {isD(r) ? 'Board' : t?.short || 'Team'} · {sd(r.submitted)}</span>
+        {member ? <span title="Cannot approve this request"><Badge>Board Member</Badge></span> : null}</span></Kv>
+      <Kv k="Status"><span className="rq-fl"><StBadge r={r} /><Timeline r={r} /></span></Kv>
+      {calc.needsVote(r) ? <Kv k="Approvals">{calc.approvalsFor(r.id).length} of {calc.needed(r)}{calc.approvalsFor(r.id).length ? <span className="muted"> · {calc.approvalsFor(r.id).map((a) => a.approver_name).join(', ')}</span> : null}</Kv> : null}
+      {r.category ? <Kv k="Category">{r.category}</Kv> : null}
+      {vendors ? <Kv k="Vendors">{vendors}</Kv> : null}
+      {isR(r) && r.zelle_contact ? <Kv k="Zelle">{r.zelle_contact}</Kv> : null}
+      {r.type === 'Pre-Approval' ? <Kv k="Pay To">{(r.pay_to || '') + (r.needed_by ? ' · needed by ' + sd(r.needed_by) : '')}</Kv> : null}
+      {inv.length || openReceipts ? (
         <div className="full scroll">
-          <table className="subtable">
-            <thead><tr><th className="nosort">Date</th><th className="nosort">Vendor</th><th className="nosort num">Amount</th><th className="nosort">File</th><th className="nosort">Added By</th><th className="nosort" /></tr></thead>
+          <table className="rq-inv">
+            <thead><tr><th>Vendor</th><th>Invoice Date</th><th>File</th><th className="num">Amount</th>{openReceipts || (r.type === 'Pre-Approval' && r.status !== 'Closed' && receipts.length) ? <th /> : null}</tr></thead>
             <tbody>
-              {receipts.map((x) => (
+              {inv.map((x) => (
                 <tr key={x.id}>
-                  <td>{date(x.date)}</td><td>{x.vendor || '—'}</td><td className="num">{money(x.amount, true)}</td>
+                  <td>{x.vendor || '—'}</td><td>{x.date ? sd(x.date) : '—'}</td>
                   <td>{x.file_path ? <FileLink path={x.file_path} name={x.file_name} /> : <span className="muted">{x.file_name || 'No file'}</span>}</td>
-                  <td>{x.uploaded_by || '—'}</td>
-                  <td>{r.status !== 'Closed' ? <button className="btn sm" onClick={() => delReceipt(x.id)}>Remove</button> : null}</td>
+                  <td className="num">{money(x.amount, true)}</td>
+                  {r.type === 'Pre-Approval' && r.status !== 'Closed' && receipts.length ? <td><button className="btn sm" onClick={() => delReceipt(x.id)}>Remove</button></td> : openReceipts ? <td /> : null}
                 </tr>
               ))}
               {openReceipts ? (
                 <tr>
-                  <td><DateIn value={rc.date} onChange={(v) => setRc({ ...rc, date: v })} /></td>
                   <td><Txt value={rc.vendor} onChange={(v) => setRc({ ...rc, vendor: v })} placeholder="Vendor and items" /></td>
+                  <td><DateIn value={rc.date} onChange={(v) => setRc({ ...rc, date: v })} /></td>
+                  <td><input className="in" type="file" accept="image/*,application/pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} /></td>
                   <td><Amount value={rc.amount} onChange={(v) => setRc({ ...rc, amount: v })} /></td>
-                  <td colSpan={2}><input className="in" type="file" accept="image/*,application/pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} /></td>
-                  <td><button className="btn sm pri" onClick={addReceipt} disabled={busy}>{busy ? 'Adding…' : 'Add Receipt'}</button></td>
+                  <td><button className="btn sm pri" onClick={addReceipt} disabled={busy}>{busy ? 'Adding…' : 'Add'}</button></td>
                 </tr>
               ) : null}
             </tbody>
+            <tfoot><tr><td colSpan={3}>Total · {inv.length} {inv.length === 1 ? 'invoice' : 'invoices'}</td><td className="num">{money(sum(inv, (x) => x.amount), true)}</td>{openReceipts || (r.type === 'Pre-Approval' && r.status !== 'Closed' && receipts.length) ? <td /> : null}</tr></tfoot>
           </table>
         </div>
       ) : null}
+      {r.type === 'Pre-Approval' && (openReceipts || r.status === 'Closed') ? <Kv k="Receipts">{money(calc.receipted(r)) + ' receipted · ' + money(r.returned || 0) + ' returned · ' + money(Math.max(0, calc.outstanding(r))) + ' outstanding'}{openReceipts ? <span className="muted">{' · due ' + sd(calc.receiptsDue(r))}</span> : null}</Kv> : null}
+      {paid || (isD(r) && r.status === 'Submitted') ? (
+        <Kv k="Payment"><div className="rq-box">
+          <span><span className="rq-k2">Method</span>{pay?.pay_method || r.pay_method || '—'}</span>
+          <span><span className="rq-k2">Reference</span>{pay?.pay_ref || r.pay_ref || '—'}</span>
+          <span><span className="rq-k2">Date</span>{sd(pay?.date || r.paid_date || r.purchase_date)}</span>
+          <span><span className="rq-k2">Amount</span><span className="rq-tot">{money(pay?.amount ?? r.amount, true)}</span></span>
+          {isD(r) && r.status === 'Submitted' ? <span className="muted">Posts to the ledger when the bookkeeper reviews it</span> : null}
+        </div></Kv>
+      ) : null}
+      {rf ? (
+        <Kv k="Refund"><div className="rq-box amb">
+          <Badge tone="amb">{rf.reason}</Badge>
+          <span><span className="rq-k2">Amount</span><span className="rq-tot">{money(rf.amount, true)}</span></span>
+          <span><span className="rq-k2">Date</span>{sd(rf.date)}</span>
+          <span><span className="rq-k2">Net Cost</span><span className="rq-tot">{money(netCost(calc, r), true)}</span></span>
+          {rf.note ? <div className="muted" style={{ flexBasis: '100%', whiteSpace: 'normal' }}>{rf.note}</div> : null}
+        </div></Kv>
+      ) : null}
+      {r.status === 'Cancelled' ? <Kv k="Cancelled">{(r.cancel_reason || '') + ' · ' + (r.cancelled_by || '') + (r.cancelled_at ? ', ' + sd(r.cancelled_at.slice(0, 10)) : '')}</Kv> : null}
+      {r.status === 'Declined' ? <Kv k="Declined">{(r.decline_reason || '') + (r.declined_by ? ' · ' + r.declined_by : '') + (r.declined_at ? ', ' + sd(r.declined_at.slice(0, 10)) : '')}</Kv> : null}
+      {r.notes ? <Kv k="Notes"><span className="wraptext">{r.notes}</span></Kv> : null}
+      {late.length && t ? <div className="full sev red">{t.short} has overdue receipts on {late.map((x) => x.id).join(', ')}.</div> : null}
       <Err msg={err} />
     </Modal>
   );
 }
 
-/** One board approval, or a decline with the reason the team sees. Mirrors approve_request() and decline_request(). */
-function ApproveForm({ id }: { id: string }) {
-  const { calc, run, user } = useData();
+/** Cancel before payment (request_cancel): a reason, and optionally a replacement order linked both ways. */
+function CancelForm({ id }: { id: string }) {
+  const { calc, run } = useData();
   const ui = useUI();
   const r = calc.request(id);
   const [reason, setReason] = useState('');
-  const [err, setErr] = useState<string | null>(null);
-  if (!r) return <Modal title="Approve Request"><div className="full empty">This request was archived.</div></Modal>;
-  const t = calc.team(r.team_id);
-  const s = calc.db.settings;
-  const got = calc.approvalsFor(r.id), n = calc.needed(r);
-  const why = calc.cannotApprove(r, user.id, user.email);
-  const bal = calc.fundBalance(t?.fund_id), after = round2(bal - r.amount);
-  const late = calc.teamBlocked(r.team_id);
-  const approve = async () => {
-    const res = await run(() => rpc('approve_request', { p_request_id: r.id }));
+  const [rep, setRep] = useState<'No Replacement' | 'Reorder As New Request'>('No Replacement');
+  const [busy, setBusy] = useState(false);
+  if (!r) return <Modal title="Cancel Request"><div className="full empty">This request was archived.</div></Modal>;
+  const save = async () => {
+    setBusy(true);
+    const res = await run(() => rpc('request_cancel', { p_request_id: r.id, p_reason: reason.trim(), p_replace: rep !== 'No Replacement' }));
+    setBusy(false);
     if (res === false) return;
-    const o = res as { approvals: number; needed: number; status: string; warnings?: string[] };
-    ui.close();
-    if (o.warnings?.length) await ui.confirm({ title: o.status === 'Approved' ? 'Approved, With A Warning' : 'Approval Recorded, With A Warning', body: <>{o.warnings.map((w, i) => <div key={i}>{w}</div>)}</>, ok: 'OK' });
-    else ui.toast(o.status === 'Approved' ? 'Approved · ready to pay' : 'Approval ' + o.approvals + ' of ' + o.needed + ' recorded');
+    const o = res as { status: string; replacement: string | null };
+    ui.close(); ui.close();
+    ui.toast(o.replacement ? 'Cancelled · replacement #' + o.replacement + ' filed' : 'Cancelled · nothing posted to the books');
+    if (o.replacement) ui.open(<RequestView id={o.replacement} />);
   };
-  const decline = async () => {
-    if (!reason.trim()) { setErr('Give the team a reason for declining.'); return; }
-    const ok = await run(() => rpc('decline_request', { p_request_id: r.id, p_reason: reason.trim() }), 'Declined · the team sees the reason');
+  const ok = !!reason.trim();
+  return (
+    <Modal title={'Cancel Request #' + r.id + '?'} foot={<>
+      <span />
+      <span className="btnrow">
+        <button className="btn" onClick={ui.close}>Back</button>
+        {ok ? <button className="btn dan" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+          : <span className="dis" title="Say why it is cancelled"><button className="btn dan" disabled>Save</button></span>}
+      </span>
+    </>}>
+      <div className="full muted">{forText(r)} · {money(r.amount, true)}. Nothing has been paid, so nothing posts to the books.</div>
+      <Kv k="Reason"><Area value={reason} onChange={setReason} placeholder="Why it is cancelled (required)" /></Kv>
+      <Kv k="Replacement"><Seg value={rep} options={['No Replacement', 'Reorder As New Request']} onChange={setRep} /></Kv>
+      {rep !== 'No Replacement' ? <div className="full muted">A copy is filed as a new request{isD(r) ? '' : ' for the board to approve'}, and the two link to each other.</div> : null}
+    </Modal>
+  );
+}
+
+/** Money back on a paid request (request_refund): an In row to the same fund, linked to the request. */
+function RefundForm({ id }: { id: string }) {
+  const { calc, run } = useData();
+  const ui = useUI();
+  const r = calc.request(id);
+  const pay = r ? calc.paymentFor(r.id) : null;
+  const max = r ? round2((pay?.amount ?? r.amount) - (r.returned || 0)) : 0;
+  const [amt, setAmt] = useState(str(max));
+  const [when, setWhen] = useState(calc.today);
+  const [reason, setReason] = useState<'Returned' | 'Cancelled'>('Returned');
+  const [note, setNote] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+  if (!r) return <Modal title="Record Refund"><div className="full empty">This request was archived.</div></Modal>;
+  const a = num(amt);
+  const save = async () => {
+    if (!(a > 0)) { setErr('Enter the refund amount.'); return; }
+    if (a > max) { setErr('The refund cannot be more than ' + money(max, true) + '.'); return; }
+    const ok = await run(() => rpc('request_refund', { p_request_id: r.id, p_amount: a, p_date: when || calc.today, p_reason: reason, p_note: orNull(note) }), 'Refund recorded · back in the fund');
     if (ok !== false) ui.close();
   };
   return (
-    <Modal title="Approve Request" foot={<>
-      <button className="btn" onClick={ui.close}>Cancel</button>
+    <Modal title={'Record Refund · Request #' + r.id} foot={<Foot onSave={save} saveLabel="Save" />}>
+      <Kv k="Amount"><span className="rq-fl"><Amount value={amt} onChange={setAmt} /><span className="muted">of {money(max, true)}</span></span></Kv>
+      <Kv k="Date"><DateIn value={when} onChange={setWhen} /></Kv>
+      <Kv k="Reason"><Seg value={reason} options={['Returned', 'Cancelled']} onChange={setReason} /></Kv>
+      <Kv k="Note"><Txt value={note} onChange={setNote} placeholder="Optional" /></Kv>
+      <Kv k="Goes Back To">{calc.fundName(calc.requestFundId(r))}</Kv>
+      <Err msg={err} />
+    </Modal>
+  );
+}
+
+/** Pick the fund a direct expense is charged to: GPRIC General or a team fund. */
+function FundPicker({ value, onPick }: { value: string; onPick: (id: string) => void }) {
+  const { calc } = useData();
+  const ui = useUI();
+  const [v, setV] = useState(value);
+  const gen = calc.db.settings.general_fund_id;
+  return (
+    <Modal title="Charge To" foot={<><span /><span className="btnrow"><button className="btn" onClick={ui.close}>Cancel</button><button className="btn pri" disabled={!v} onClick={() => { onPick(v); ui.close(); }}>Save</button></span></>}>
+      <div className="full rq-picker" role="radiogroup">
+        {calc.directFunds().map((f) => (
+          <label key={f.id}>
+            <input type="radio" name="rqfund" checked={v === f.id} onChange={() => setV(f.id)} />
+            <span>{f.id === gen ? 'GPRIC General' : f.name}{f.id === gen ? <span className="muted"> · {f.name}</span> : null}</span>
+            <span className="bal">{money(calc.fundBalance(f.id))}</span>
+          </label>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
+type Inv = { k: number; vendor: string; amount: string; date: string; file: File | null };
+/** A purchase the board already paid (direct_expense_file): one payment, any number of invoices. */
+function DirectForm() {
+  const { calc, run } = useData();
+  const ui = useUI();
+  const gen = calc.db.settings.general_fund_id;
+  const [purpose, setPurpose] = useState('');
+  const [fund, setFund] = useState('');
+  const [method, setMethod] = useState<(typeof DIRECT_PAY)[number]>('Debit Card');
+  const [ref, setRef] = useState('');
+  const [when, setWhen] = useState(calc.today);
+  const [inv, setInv] = useState<Inv[]>([{ k: 1, vendor: '', amount: '', date: calc.today, file: null }]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const set = (k: number, p: Partial<Inv>) => setInv((xs) => xs.map((x) => (x.k === k ? { ...x, ...p } : x)));
+  const total = round2(sum(inv, (x) => num(x.amount) || 0));
+  const why = !purpose.trim() ? 'Say what was bought'
+    : !fund ? 'Choose the fund to charge'
+    : !inv.length || inv.some((x) => !x.vendor.trim() || !(num(x.amount) > 0)) ? 'Each invoice needs a vendor and an amount'
+    : method === 'Check' && !ref.trim() ? 'Enter the check number' : null;
+  const save = async () => {
+    if (why) return;
+    setBusy(true); setErr(null);
+    const rows: Record<string, unknown>[] = [];
+    for (const x of inv) {
+      let path: string | null = null, name: string | null = null;
+      if (x.file) {
+        const up = await uploadFile('requests/direct', x.file);
+        if ('error' in up) { setBusy(false); setErr('Upload failed: ' + up.error); return; }
+        path = up.path; name = up.name;
+      }
+      rows.push({ vendor: x.vendor.trim(), amount: num(x.amount), date: x.date || when, file_name: name, file_path: path });
+    }
+    const res = await run(() => rpc('direct_expense_file', { p: { purpose: purpose.trim(), charge_fund_id: fund, pay_method: method, pay_ref: orNull(ref), paid_date: when || calc.today, invoices: rows } }));
+    setBusy(false);
+    if (res === false) return;
+    const o = res as { id: string; amount: number; warnings?: string[] };
+    ui.close();
+    if (o.warnings?.length) await ui.confirm({ title: 'Filed, With A Warning', body: <>{o.warnings.map((w, i) => <div key={i}>{w}</div>)}</>, ok: 'OK' });
+    else ui.toast('Filed · #' + o.id + ' goes to the bookkeeper to review');
+  };
+  return (
+    <Modal wide title="New Direct Expense" foot={<>
+      <span className="muted">{why ? '' : 'Goes to the bookkeeper to review.'}</span>
       <span className="btnrow">
-        <button className="btn dan" onClick={decline}>Decline</button>
-        {why ? <span className="dis" title={why}><button className="btn pri" disabled>Approve</button></span> : <button className="btn pri" onClick={approve}>Approve</button>}
+        <button className="btn" onClick={ui.close}>Cancel</button>
+        {why ? <span className="dis" title={why}><button className="btn pri" disabled>Save</button></span>
+          : <button className="btn pri" onClick={save} disabled={busy} title="Goes to the bookkeeper to review. Reviewing posts it to the fund ledger as already paid.">{busy ? 'Saving…' : 'Save'}</button>}
       </span>
     </>}>
-      <div className="full reqhead"><TypeBadge r={r} /><b>{t?.short}</b><span className="muted">·</span>{forText(r)}<span className="muted">·</span><b>{money(r.amount)}</b></div>
-      <Kv k="Requestor">{requestor(r)}{calc.requestorMember(r) ? <> <Badge>Board Member</Badge></> : null}</Kv>
-      {isR(r) ? <>
-        <Kv k="Purchase Date">{r.purchase_date ? date(r.purchase_date) : ''}</Kv>
-        <Kv k="Receipt">{r.receipt_path ? <FileLink path={r.receipt_path} name={r.receipt_name} /> : ''}</Kv>
-        <Kv k="Pays To">{r.zelle_contact ? 'Zelle ' + r.zelle_contact : ''}</Kv>
-      </> : <>
-        <Kv k="Needed By">{r.needed_by ? date(r.needed_by) : ''}</Kv>
-        <Kv k="Pays To">{r.pay_to}</Kv>
-      </>}
-      <Kv k="Team Balance">{money(bal) + ' now · ' + money(after) + ' after'}{after < 0 ? <> <span title="Approving warns; paying it will be blocked unless the Treasurer overrides."><Badge tone="red">Below Zero</Badge></span></> : null}</Kv>
-      {late.length ? <div className="full sev red">{t?.short} has overdue receipts on {late.map((x) => x.id).join(', ')}.</div> : null}
-      <Kv k="Approvals">
-        <span className="appr">
-          {got.map((a) => <div key={a.id}><span className="dot" style={{ background: 'var(--g)' }} />{a.approver_name}<span className="muted">{sd(a.approved_at.slice(0, 10))}</span></div>)}
-          {got.length < n ? <div><span className="dot" style={{ background: 'var(--amb)' }} />{n - got.length} more needed <span className="muted">({got.length} of {n})</span>
-            <span className="info" title={'Rule: up to ' + money(s.approval_threshold) + ' needs ' + s.approvals_under + ', over needs ' + s.approvals_over + '. The requestor never approves their own, and one board member cannot give two approvals.'}>?</span></div> : null}
-        </span>
-      </Kv>
-      <Kv k="Reason If Declined"><Txt value={reason} onChange={setReason} placeholder="One line the team will see" /></Kv>
-      {why ? <div className="full muted">{why}</div> : null}
+      <Kv k="What Was Bought"><Txt value={purpose} onChange={setPurpose} placeholder="e.g. Field elements and tools" autoFocus /></Kv>
+      <Kv k="Charge To"><span className="rq-fl">
+        <button type="button" className="btn" onClick={() => ui.open(<FundPicker value={fund} onPick={setFund} />)}>{fund ? (fund === gen ? 'GPRIC General' : calc.fundName(fund)) : 'Choose Fund…'}</button>
+        {fund ? <span className="muted">{money(calc.fundBalance(fund))} balance</span> : null}
+      </span></Kv>
+      <Kv k="Paid By"><span className="rq-fl">
+        <Seg value={method} options={[...DIRECT_PAY]} onChange={setMethod} />
+        {method === 'Check' ? <Txt value={ref} onChange={setRef} placeholder="Check number" /> : null}
+      </span></Kv>
+      <Kv k="Date Paid"><DateIn value={when} onChange={setWhen} /></Kv>
+      <Kv k="Invoices"><span className="muted">One payment, any number of invoices</span></Kv>
+      <div className="full scroll">
+        <table className="rq-inv">
+          <thead><tr><th>Vendor</th><th className="num">Amount</th><th>Invoice Date</th><th>File</th><th /></tr></thead>
+          <tbody>
+            {inv.map((x) => (
+              <tr key={x.k}>
+                <td><Txt value={x.vendor} onChange={(v) => set(x.k, { vendor: v })} placeholder="Vendor" /></td>
+                <td><Amount value={x.amount} onChange={(v) => set(x.k, { amount: v })} /></td>
+                <td><DateIn value={x.date} onChange={(v) => set(x.k, { date: v })} /></td>
+                <td><label className="btn sm" style={{ cursor: 'pointer' }}>{x.file ? x.file.name.slice(0, 24) : 'Attach File'}
+                  <input type="file" hidden accept="image/*,application/pdf" onChange={(e) => set(x.k, { file: e.target.files?.[0] || null })} /></label></td>
+                <td>{inv.length > 1 ? <button type="button" className="lnk" aria-label="Remove invoice" title="Remove invoice" onClick={() => setInv((xs) => xs.filter((y) => y.k !== x.k))}>×</button> : null}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot><tr>
+            <td><button type="button" className="lnk" onClick={() => setInv((xs) => [...xs, { k: Math.max(0, ...xs.map((y) => y.k)) + 1, vendor: '', amount: '', date: when || calc.today, file: null }])}>+ Add Invoice</button></td>
+            <td className="num" colSpan={4}>Total · {inv.length} {inv.length === 1 ? 'invoice' : 'invoices'} <span className="rq-tot">{money(total, true)}</span></td>
+          </tr></tfoot>
+        </table>
+      </div>
+      <div className="full muted">Only the Treasurer, the bookkeeper and officers the Treasurer names can file these. Reviewing posts it to the fund ledger as already paid.</div>
       <Err msg={err} />
     </Modal>
   );
@@ -323,7 +605,7 @@ function PayForm({ id }: { id: string }) {
   const [method, setMethod] = useState<PayMethod>(r && isR(r) ? 'Zelle' : 'Check');
   const [when, setWhen] = useState(calc.today);
   const [ref, setRef] = useState('');
-  if (!r) return <Modal title="Mark Paid"><div className="full empty">This request was archived.</div></Modal>;
+  if (!r) return <Modal title="Record Payment"><div className="full empty">This request was archived.</div></Modal>;
   const t = calc.team(r.team_id);
   const w = t?.fund_id ? calc.spendWarnings(t.fund_id, r.amount, 'Robotics Teams') : ['This team has no fund. Set one under Teams first.'];
   const save = async () => {
@@ -339,14 +621,14 @@ function PayForm({ id }: { id: string }) {
   };
   const check = method === 'Check';
   return (
-    <Modal title="Mark Paid" foot={<Foot onSave={save} saveLabel="Mark Paid" />}>
+    <Modal title="Record Payment" foot={<Foot onSave={save} saveLabel="Record Payment" />}>
       <div className="full reqhead"><TypeBadge r={r} /><b>{t?.short}</b><span className="muted">·</span>{forText(r)}</div>
       <Kv k="Amount"><b>{money(r.amount)}</b></Kv>
       <Kv k="Pay To">{isR(r) ? requestor(r) + (r.zelle_contact ? ' · Zelle ' + r.zelle_contact : '') : (r.pay_to || '') + (r.vendor ? ' · ' + r.vendor : '')}</Kv>
       <Kv k="Method"><Seg value={method} options={[...PAY_METHODS]} onChange={setMethod} /></Kv>
       <Kv k="Date Paid"><DateIn value={when} onChange={setWhen} /></Kv>
       <Kv k={check ? 'Check Number' : 'Confirmation Number'}><Txt value={ref} onChange={setRef} placeholder={check ? 'e.g. 110' : method === 'Zelle' ? 'Zelle confirmation code' : 'Reference from the bank'} /></Kv>
-      <div className="full muted">Saving writes an Out row to the Ledger: {money(-r.amount)} from {calc.fundName(t?.fund_id) || 'the team fund'}.{isR(r) ? '' : ' It also starts the ' + calc.receiptDays + '-day receipt clock.'}</div>
+      <div className="full muted">Saving writes one Out row to the Ledger for the whole request: {money(-r.amount)} from {calc.fundName(t?.fund_id) || 'the team fund'}.{isR(r) ? '' : ' It also starts the ' + calc.receiptDays + '-day receipt clock.'}</div>
       <Warnings list={w} blocks />
     </Modal>
   );
@@ -375,7 +657,7 @@ function RulesForm() {
       <Kv k="Threshold"><Amount value={t} onChange={setT} placeholder="500.00" /></Kv>
       <Kv k="Up To Threshold"><Seg value={under} options={[['1', '1 Approval'], ['2', '2 Approvals']]} onChange={setUnder} /></Kv>
       <Kv k="Over Threshold"><Seg value={over} options={[['1', '1 Approval'], ['2', '2 Approvals'], ['3', '3 Approvals']]} onChange={setOver} /></Kv>
-      <Kv k="Applies To">Pre-Approvals and Reimbursements<span className="info" title="One rule for both request types. Changing it applies to requests still waiting; finished approvals stand.">?</span></Kv>
+      <Kv k="Applies To">Pre-Approvals and Reimbursements<span className="info" title="One rule for both team request types. Direct expenses are already paid and go to the bookkeeper's review instead. Changing it applies to requests still waiting; finished approvals stand.">?</span></Kv>
       <Kv k="Always">Requestor excluded · one approval per member</Kv>
       <Kv k="Bookkeeper"><Check checked={bk} onChange={setBk}>The bookkeeper may approve (for testing)</Check></Kv>
       <Kv k="Preview">{amt >= 0 ? 'Up to ' + money(amt) + ': ' + ap(under) + ' · over ' + money(amt) + ': ' + ap(over) : ''}</Kv>
@@ -437,9 +719,9 @@ function RequestForm({ id }: { id?: string }) {
     ui.close();
   };
   return (
-    <Modal title={old ? 'Edit ' + old.id : 'New Request'} foot={<Foot onSave={save} saveLabel={old ? 'Save' : 'Submit To The Board'} />}>
-      {!old ? <div className="full muted">Teams send requests from their Team Portal. Use this to enter one on a team&apos;s behalf.</div> : null}
-      <Kv k="Type"><Seg value={f.type} options={[...REQUEST_TYPES]} onChange={(v) => set({ type: v })} /></Kv>
+    <Modal title={old ? 'Edit #' + old.id : 'New Request'} foot={<Foot onSave={save} saveLabel={old ? 'Save' : 'Submit To The Board'} />}>
+      {!old ? <div className="full muted">Teams send requests from their Team Portal. Use this to enter one on a team&apos;s behalf. A purchase the board already paid is a New Direct Expense instead.</div> : null}
+      <Kv k="Type"><Seg value={f.type} options={TEAM_TYPES} onChange={(v) => set({ type: v })} /></Kv>
       <Kv k="Team"><Select value={f.team_id} onChange={(v) => set({ team_id: v })} options={db.teams.map((x) => [x.id, x.name])} /></Kv>
       <Kv k="Requestor"><Txt value={f.requestor_name} onChange={(v) => set({ requestor_name: v })} placeholder="Coach or treasurer's name" /></Kv>
       <Kv k="Requestor Email"><Txt value={f.requestor_email} onChange={(v) => set({ requestor_email: v })} placeholder="Used to stop them approving their own request" /></Kv>
@@ -458,7 +740,7 @@ function RequestForm({ id }: { id?: string }) {
         <Kv k="Needed By"><DateIn value={f.needed_by} onChange={(v) => set({ needed_by: v })} /></Kv>
       </>}
       <Kv k="Submitted"><DateIn value={f.submitted} onChange={(v) => set({ submitted: v })} /></Kv>
-      {old ? <Kv k="Status"><St s={old.status} /><div className="muted" style={{ fontSize: 12 }}>Approving, declining, paying and closing set this. It is not edited by hand.</div></Kv> : null}
+      {old ? <Kv k="Status"><StBadge r={old} /><div className="muted" style={{ fontSize: 12 }}>Approving, declining, paying and closing set this. It is not edited by hand.</div></Kv> : null}
       <Kv k="Board Notes"><Area value={f.notes} onChange={(v) => set({ notes: v })} /></Kv>
       {t ? <Kv k="Team Fund">{money(calc.fundBalance(t.fund_id))} balance · {money(calc.teamMoney(t).approvedUnpaid)} approved, not paid</Kv> : null}
       <Warnings list={warnings} />

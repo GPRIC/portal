@@ -29,7 +29,7 @@ export const Icon = {
 
 /** The name a page shows as, from its path. */
 const PAGE_NAMES: Record<string, string> = {
-  '/dashboard': 'Dashboard', '/grants': 'Grants', '/donors': 'Donors', '/requests': 'Team Requests', '/balances': 'Team Balances',
+  '/dashboard': 'Dashboard', '/grants': 'Grants', '/donors': 'Donors', '/requests': 'Requests', '/balances': 'Team Balances',
   '/ledger': 'Ledger', '/accounts': 'Accounts', '/documents': 'Documents', '/meetings': 'Meetings', '/history': 'History',
   '/problems': 'Problem Reports', '/team': 'Team Portal', '/team/history': 'Team History',
 };

@@ -56,12 +56,14 @@ export const HELP: Record<string, About> = {
     who: WHO,
   },
   requests: {
-    purpose: 'Every team money request in one queue: pre-approvals before a team spends, and reimbursements after someone paid out of pocket. Board members approve, the treasurer pays, and receipts close the loop.',
+    purpose: 'Every money request in one queue: pre-approvals before a team spends, reimbursements after someone paid out of pocket, and direct expenses the board already paid by debit card or check. Board members approve, the treasurer pays, the bookkeeper reviews direct expenses, and receipts close the loop.',
     steps: [
       'Teams send requests from their Team Portal. New Request enters one on a team\'s behalf.',
-      'Needs Approval lists what is waiting. Click the check to approve or decline. Up to the threshold one approval is enough; over it, two. The gear sets the rules.',
+      'New Direct Expense logs a purchase already paid by debit card or check, charged to GPRIC General or a team fund, with any number of invoices. Only the Treasurer, the bookkeeper and officers the Treasurer names can file one. The bookkeeper\'s Mark Reviewed posts it to that fund\'s ledger as already paid.',
+      'Needs Action lists what is waiting. Open a request to approve or decline it. Up to the threshold one approval is enough; over it, two. The gear sets the rules. Filters narrows by type.',
       'Nobody approves their own request, and each board member approves once. A board member who is also the requestor is marked.',
-      'To Pay lists approved requests. Pay records how it was paid (Zelle, check, debit card or ACH), the date and the confirmation or check number, and writes the ledger entry.',
+      'Record Payment records how it was paid (Zelle, check, debit card or ACH), the date and the confirmation or check number, and writes one ledger entry for the whole request.',
+      'Cancel Request withdraws a request before it is paid (a reason is required; nothing posts to the books) and can reorder it as a new request linked both ways. Record Refund puts money back into the same fund on a paid request.',
       'A paid pre-approval has 60 days for receipts; the team adds them in its portal. A team with receipts past due cannot send new requests until they are in.',
       'Receipts Complete returns any unspent money to the team\'s fund and closes the request. A reimbursement already has its receipt and is done when paid.',
     ],
@@ -93,7 +95,7 @@ export const HELP: Record<string, About> = {
     purpose: 'Board meetings and email votes, with agendas, minutes, every vote\'s tally and who stepped out for a declared interest.',
     steps: [
       'Add Meeting schedules a meeting. Click one to edit it, upload the agenda or minutes, record a vote, or delete it.',
-      'Votes recorded on Team Requests appear here automatically.',
+      'Votes recorded on Requests appear here automatically.',
       'Board Members lists who votes, their seat, and any declared interest in a team.',
     ],
     who: WHO,

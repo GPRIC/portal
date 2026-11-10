@@ -149,7 +149,7 @@ function EntryForm({ id, dir }: { id?: string; dir: 'in' | 'out' }) {
   // Undo an entry: posts the opposite entry and keeps both. A request's payment is undone from the request.
   const del = async () => {
     if (!old) return;
-    if (req) { setErr('This entry pays team request ' + req.id + '. Refund or cancel it from Team Requests.'); return; }
+    if (req) { setErr('This entry pays team request ' + req.id + '. Refund or cancel it from Requests.'); return; }
     const why = await ui.ask({
       title: 'Reverse This Entry',
       body: <>Reverse {money(old.amount, true)} {old.dir === 'in' ? 'into' : 'out of'} {calc.fundName(old.fund_id)} on {date(old.date)}? An opposite entry is posted today and both stay in the books.{linkedGift ? ' The gift it records is taken off the donor.' : ''}</>,
@@ -166,7 +166,7 @@ function EntryForm({ id, dir }: { id?: string; dir: 'in' | 'out' }) {
       {old ? <Kv k="Direction">{old.dir === 'in' ? <Badge tone="grn">Money In</Badge> : <Badge tone="red">Money Out</Badge>}</Kv> : null}
       {dir === 'in' && !old ? <div className="full muted">For a gift from a donor, use Donors, Log Donation, so the donor is credited and thanked.</div> : null}
       {linkedGift ? <Kv k="Donor">{donor?.name || old?.party} · <Link className="doclink" href="/donors">Donors</Link><div className="muted" style={{ fontSize: 12 }}>This entry is a gift. Changing the amount, date or fund here changes the gift too.</div></Kv> : null}
-      {req ? <Kv k="Team Request">{req.id} · {req.purpose} · <Link className="doclink" href="/requests">Team Requests</Link></Kv> : null}
+      {req ? <Kv k="Team Request">{req.id} · {req.purpose} · <Link className="doclink" href="/requests">Requests</Link></Kv> : null}
       {!linkedGift ? <Kv k={dir === 'in' ? 'From' : 'Paid To'}><Txt value={f.party} onChange={(v) => set({ party: v })} placeholder={dir === 'in' ? 'Who it came from' : 'Vendor'} /></Kv> : null}
       <Kv k="Description"><Txt value={f.memo} onChange={(v) => set({ memo: v })} /></Kv>
       <Kv k="Amount"><Amount value={f.amount} onChange={(v) => set({ amount: v })} /></Kv>
