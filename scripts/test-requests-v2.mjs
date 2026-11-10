@@ -274,8 +274,16 @@ await as(T, `select public.direct_expense_review($1, 'Grant money arriving next 
 const ovC = await q(`select action, fund_id, reason from public.money_overrides where record_id = $1`, [hc.id]);
 ok((await req(hc.id)).status === 'Reviewed' && ovC.length >= 1 && ovC[0].action === 'review' && ovC[0].fund_id === 'F-9255', 'the Treasurer override posts it and is recorded');
 const hg = await one(T, `select public.direct_expense_file($1)`, [de({ purpose: 'Roll back probe G', charge_fund_id: 'F-GEN', pay_method: 'Debit Card', pay_ref: null, invoices: [{ vendor: 'Sample Office', amount: 12 }] })]);
+await fails(T, `select public.direct_expense_review($1, 'any reason')`, [hg.id], /The bookkeeper reviews direct expenses/, 'the Treasurer cannot review a GPRIC General expense, even with a reason');
+ok((await bal(otherFund)) > 5, 'the other team fund has more than $5');
+const hw = await one(O, `select public.direct_expense_file($1)`, [de({ purpose: 'Roll back probe W', charge_fund_id: otherFund, invoices: [{ vendor: 'Sample Small Vendor', amount: 5 }] })]);
+await fails(T, `select public.direct_expense_review($1, 'any reason')`, [hw.id], /The bookkeeper reviews direct expenses/, 'the Treasurer cannot review a team-fund expense that breaks no rule');
+ok((await req(hg.id)).status === 'Submitted' && (await req(hw.id)).status === 'Submitted', 'both stay waiting for the bookkeeper');
+ok(num(await one(T, `select count(*) from public.money_overrides where record_id = any($1)`, [[hg.id, hw.id]])) === 0, 'a refused Treasurer review logs no override');
 await as(K, `select public.direct_expense_review($1)`, [hg.id]);
-ok(num(await one(T, `select count(*) from public.money_overrides where record_id = $1`, [hg.id])) === 0, 'GPRIC General needs no team spending check');
+await as(K, `select public.direct_expense_review($1, 'not needed')`, [hw.id]);
+ok((await req(hw.id)).status === 'Reviewed', 'the bookkeeper reviews a team-fund expense that breaks no rule');
+ok(num(await one(T, `select count(*) from public.money_overrides where record_id = any($1)`, [[hg.id, hw.id]])) === 0, 'GPRIC General and in-balance team expenses log no override');
 
 // ---------------------------------------------------------------- team users see only their own team
 

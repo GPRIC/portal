@@ -323,6 +323,7 @@ declare
   v_files int;
   v_team text;
   v_teamfund boolean;
+  v_ovr bigint := 0;
 begin
   if nullif(trim(coalesce(p_override, '')), '') is null then
     perform public.require_role(array['bookkeeper'], 'Reviewing a direct expense');
@@ -340,7 +341,15 @@ begin
   v_teamfund := v_team is not null
                 and r.charge_fund_id is distinct from (select s.general_fund_id from public.settings s where s.id = 1);
   if v_teamfund then
+    select count(*) into v_ovr from public.money_overrides o where o.record_id = r.id and o.action = 'review';
     perform public.spend_check(r.charge_fund_id, r.amount, v_team, 'Robotics Teams', p_override, 'review', r.id);
+  end if;
+  -- The Treasurer reviews only to override a spending rule that actually broke on a team fund (and was just recorded).
+  if public.my_role() <> 'bookkeeper'
+     and (not v_teamfund
+          or (select count(*) from public.money_overrides o where o.record_id = r.id and o.action = 'review') <= v_ovr) then
+    raise exception 'The bookkeeper reviews direct expenses; the Treasurer reviews one only to override a spending rule it breaks on a team fund'
+      using errcode = '42501';
   end if;
   v_cat := coalesce(r.category, case when v_teamfund then 'Robotics Teams' else 'Administration' end);
   select count(*) into v_files from public.receipts c where c.request_id = r.id and c.archived_at is null and c.file_path is not null;
