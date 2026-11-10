@@ -39,8 +39,7 @@ create index change_log_team_idx on public.change_log (team_id, at desc);
 alter table public.change_log enable row level security;
 create policy board_read on public.change_log for select to authenticated
   using ((select public.is_board()) or (select coalesce(public.my_role() = 'cpa', false)));
-create policy team_read on public.change_log for select to authenticated
-  using (team_id is not null and team_id = (select public.my_team()));
+-- A team login reads its own team's history through public.change_log_team (end of file), never this table.
 revoke insert, update, delete, truncate on public.change_log from public, anon, authenticated;
 grant select on public.change_log to authenticated;
 
@@ -443,7 +442,8 @@ begin
       execute format('update public.%I set archived_at = now(), archived_by = $1, archive_reason = $2 where id::text = $3 and archived_at is null', e.tbl)
         using public.my_name(), 'Roll back: ' || trim(p_reason), e.record_id;
     elsif e.after is null then
-      -- deleted: put it back as it was
+      -- deleted: put it back as it was (sample rows are cleared for good)
+      if coalesce((e.before ->> 'sample')::boolean, false) then raise exception 'Sample records are cleared for good; they are not put back'; end if;
       execute format('insert into public.%I overriding system value select * from jsonb_populate_record(null::public.%I, $1)', e.tbl, e.tbl)
         using e.before;
     else
@@ -493,3 +493,37 @@ end;
 $$;
 revoke all on function public.zeffy_upsert(jsonb, text) from public, anon;
 grant execute on function public.zeffy_upsert(jsonb, text) to authenticated, service_role;
+
+-- ---------------------------------------------------------------- a team login's own history
+
+-- Teams read History through this view, not public.change_log: only their own team's rows, a donor who asked to stay
+-- anonymous shows as "Anonymous" (label, summary, before and after), and donor, gift and grant links are left out.
+create or replace function public.log_team_mask(j jsonb, p_anon text)
+returns jsonb
+language sql
+immutable
+set search_path = ''
+as $$
+  select case when j is null then null
+              when p_anon is null then j - array['donor_id','grant_id','donation_id']
+              else replace((j - array['donor_id','grant_id','donation_id'])::text,
+                           trim(both '"' from to_jsonb(p_anon)::text), 'Anonymous')::jsonb end;
+$$;
+
+create view public.change_log_team with (security_barrier = true) as
+select c.id, c.at, c.user_id, c.who, c.role, c.action, c.what, c.tbl, c.record_id,
+       case when a.name is null then c.label else replace(c.label, a.name, 'Anonymous') end as label,
+       case when a.name is null then c.summary else replace(c.summary, a.name, 'Anonymous') end as summary,
+       public.log_team_mask(c.before, a.name) as before,
+       public.log_team_mask(c.after, a.name) as after,
+       c.team_id, c.device, c.via, c.reason, c.rolls_back_id, c.rolled_back_at, c.rolled_back_by, c.rollback_reason
+  from public.change_log c
+  left join lateral (
+    select d.name from public.donors d
+     where d.anonymous and nullif(trim(d.name), '') is not null
+       and d.id in (c.before ->> 'donor_id', c.after ->> 'donor_id',
+                    (select x.donor_id from public.donations x where x.id = coalesce(c.after ->> 'donation_id', c.before ->> 'donation_id')))
+     limit 1) a on true
+ where c.team_id is not null and c.team_id = (select public.my_team());
+revoke all on public.change_log_team from public, anon;
+grant select on public.change_log_team to authenticated;

@@ -161,7 +161,7 @@ const zd = Object.fromEntries((await db.query(`select zeffy_key, fund_id, unassi
 ok(zd.ames.unassigned && zd.ames.fund_id === 'F-GEN', 'blank fund goes to general, unassigned');
 ok(zd.bell.fund_id === 'F-9255' && !zd.bell.unassigned, 'team fund matched by name');
 ok(!zd.cole.unassigned && zd.na.unassigned, 'General Fund assigned; unknown fund unassigned');
-rows[2].payout_date = '2026-11-05';
+rows[2].payout_date = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10); // still in transit whatever day the tests run
 z = (await as({ role: 'service_role' }, `select public.zeffy_upsert($1, 'api') z`, [JSON.stringify(rows)])).rows[0].z;
 ok(z.inserted === 0 && z.updated === 1, 'service role re-sync only refreshes ' + JSON.stringify(z));
 ok((await db.query(`select count(*)::int n from public.ledger l join public.donations d on d.id = l.donation_id where d.zeffy_key is not null`)).rows[0].n === 4, 'each Zeffy gift has one ledger row');

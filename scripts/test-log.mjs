@@ -1,5 +1,5 @@
 // P24 action log and P25 roll back: every change is logged with the right person, the log is append only,
-// a team login sees only its own team's history, and only the Treasurer rolls back, through the money rules.
+// a team login sees only its own team's history (through change_log_team, anonymous donors masked), and only the Treasurer rolls back, through the money rules.
 // Called from test-db.mjs after the money checks.
 export async function run({ db, as, fails, ok, B1, B2, B3, C }) {
   const one = async (claims, sql, params = []) => Object.values((await as(claims, sql, params)).rows[0])[0];
@@ -72,9 +72,22 @@ export async function run({ db, as, fails, ok, B1, B2, B3, C }) {
   // Read access: the board sees all; a team login only its own team.
   const total = (await db.query(`select count(*)::int n from public.change_log`)).rows[0].n;
   ok((await one(B2, `select count(*)::int from public.change_log`)) === total, 'the board sees every change');
-  const mine = await one(C, `select count(*)::int from public.change_log`);
-  const leak = await one(C, `select count(*)::int from public.change_log where team_id is distinct from 'T-9255'`);
+  ok((await one(C, `select count(*)::int from public.change_log`)) === 0, 'a team login reads nothing from the log table itself');
+  ok((await one(B2, `select count(*)::int from public.change_log_team`)) === 0, 'the board has no team view rows');
+  const mine = await one(C, `select count(*)::int from public.change_log_team`);
+  const leak = await one(C, `select count(*)::int from public.change_log_team where team_id is distinct from 'T-9255'`);
   ok(mine > 0 && leak === 0, `a team login sees only its own team (${mine} rows)`);
+  // A donor who asked to stay anonymous is never named to a team, and donor, gift and grant links are left out.
+  const anon = (await db.query(`select o.id, o.name from public.donors o join public.donations d on d.donor_id = o.id where d.fund_id = 'F-9255' and d.zeffy_key like '%|bell'`)).rows[0];
+  await db.query(`update public.donors set anonymous = true where id = $1`, [anon.id]);
+  const tv = (await as(C, `select * from public.change_log_team where tbl in ('donations','ledger')`)).rows;
+  const named = tv.filter((r) => JSON.stringify([r.label, r.summary, r.before, r.after]).includes(anon.name));
+  ok(tv.length > 0 && named.length === 0, `team rows never name an anonymous donor (${tv.length} gift rows)`);
+  ok(tv.some((r) => /Anonymous/.test(r.label || '')), 'the anonymous gift shows as Anonymous');
+  ok(!tv.some((r) => ['donor_id', 'grant_id', 'donation_id'].some((k) => (r.before && k in r.before) || (r.after && k in r.after))), 'team rows carry no donor, gift or grant links');
+  const bv = (await as(B2, `select label from public.change_log where tbl = 'donations' and record_id = (select id from public.donations where donor_id = $1 limit 1)`, [anon.id])).rows;
+  ok(bv.some((r) => (r.label || '').includes(anon.name)), 'the board still sees the donor');
+  await db.query(`update public.donors set anonymous = false where id = $1`, [anon.id]);
 
   // Roll back: Treasurer only, reason required, logged, and through the money rules.
   await fails(B2, `select public.rollback_change($1, 'oops')`, [docChange.id], /not allowed for your role/, 'only the Treasurer rolls back');
@@ -89,6 +102,18 @@ export async function run({ db, as, fails, ok, B1, B2, B3, C }) {
   await fails(B1, `select public.rollback_change($1, 'x')`, [rb.id], /itself a roll back/, 'a roll back is not rolled back');
   const sess = (await db.query(`select id from public.change_log where tbl = 'sessions' limit 1`)).rows[0].id;
   await fails(B1, `select public.rollback_change($1, 'x')`, [sess], /cannot be rolled back/, 'a sign-in cannot be rolled back');
+  // A change the record has moved on from is refused.
+  await as(B2, `update public.documents set title = 'Step A' where id = $1`, [doc]);
+  const stepA = await last(`tbl = 'documents' and record_id = $1`, [doc]);
+  await as(B2, `update public.documents set title = 'Step B' where id = $1`, [doc]);
+  await fails(B1, `select public.rollback_change($1, 'x')`, [stepA.id], /changed since/, 'roll back refuses an older change once the record moved on');
+  // A deleted sample record is cleared for good, never put back.
+  const smp = (await db.query(`select id from public.documents where sample limit 1`)).rows[0];
+  if (smp) {
+    await db.query(`delete from public.documents where id = $1`, [smp.id]);
+    const del = await last(`tbl = 'documents' and record_id = $1 and action = 'Deleted'`, [smp.id]);
+    await fails(B1, `select public.rollback_change($1, 'x')`, [del.id], /cleared for good/, 'a deleted sample record is not put back');
+  } else ok(false, 'no sample document to test the sample re-insert refusal');
   // Ledger: an added entry is reversed, never deleted.
   const addLog = (await db.query(`select id from public.change_log where tbl = 'ledger' and record_id = $1 and action = 'Added'`, [led])).rows[0].id;
   await as(B1, `select public.rollback_change($1, 'Not our deposit')`, [addLog]);

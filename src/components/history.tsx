@@ -2,7 +2,7 @@
 // History: every action in the portal, written by the database itself (public.change_log, 0005_action_log.sql).
 // Opens on the last 7 days; Who, What and Action sit behind Filters. A row opens the record before and after, the
 // device, and every change to that record. Roll back is Treasurer only, with a reason, and is itself logged.
-// The board sees everything; a team login sees its own team's history, read only (row security does the limiting).
+// The board sees everything; a team login sees its own team's history, read only, through public.change_log_team (anonymous donors masked).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { initials } from '@/lib/format';
@@ -87,7 +87,7 @@ export function History({ canRollBack, team }: { canRollBack: boolean; team?: bo
 
   useEffect(() => {
     let live = true;
-    let q = supabase().from('change_log').select('*', { count: 'exact' });
+    let q = supabase().from(team ? 'change_log_team' : 'change_log').select('*', { count: 'exact' });
     const s = since(f.range);
     if (s && !f.rec) q = q.gte('at', s);
     if (f.who.length) q = q.in('who', f.who);
@@ -104,17 +104,17 @@ export function History({ canRollBack, team }: { canRollBack: boolean; team?: bo
       setErr(null); setRows((data || []) as LogRow[]); setCount(n || 0);
     });
     return () => { live = false; };
-  }, [f, sort, page, per, tick]);
+  }, [f, sort, page, per, tick, team]);
 
   // Who to offer in Filters: everyone in the log for the range shown.
   useEffect(() => {
     let live = true;
-    let q = supabase().from('change_log').select('who').order('at', { ascending: false }).limit(2000);
+    let q = supabase().from(team ? 'change_log_team' : 'change_log').select('who').order('at', { ascending: false }).limit(2000);
     const s = since(f.range);
     if (s) q = q.gte('at', s);
     q.then(({ data }) => { if (live && data) setPeople([...new Set((data as { who: string }[]).map((r) => r.who))].sort()); });
     return () => { live = false; };
-  }, [f.range, tick]);
+  }, [f.range, tick, team]);
 
   const upd = (p: Partial<F>) => { setF((x) => ({ ...x, ...p })); setPage(0); };
   const hidden = f.who.length + f.what.length + f.act.length > 0;
@@ -210,11 +210,11 @@ function Detail({ r, canRollBack, team, onRecord, onDone }: {
   useEffect(() => {
     let live = true;
     if (r.record_id) {
-      supabase().from('change_log').select('id', { count: 'exact', head: true }).eq('tbl', r.tbl).eq('record_id', r.record_id)
+      supabase().from(team ? 'change_log_team' : 'change_log').select('id', { count: 'exact', head: true }).eq('tbl', r.tbl).eq('record_id', r.record_id)
         .then(({ count }) => { if (live) setSame(count ?? null); });
     }
     return () => { live = false; };
-  }, [r.tbl, r.record_id]);
+  }, [r.tbl, r.record_id, team]);
   const keys = [...new Set([...Object.keys(r.before || {}), ...Object.keys(r.after || {})])].filter((k) => !HIDE.has(k));
   const changed = (k: string) => JSON.stringify(r.before?.[k] ?? null) !== JSON.stringify(r.after?.[k] ?? null);
   // changed fields first, then the rest of the record for context
