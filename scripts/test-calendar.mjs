@@ -147,6 +147,11 @@ try { await db.exec(`delete from public.calendar_events where id = '${meet}'`); 
 catch (x) { ok(/archived, never deleted/.test(x.message), 'even the owner cannot delete an event'); }
 const log = (await db.query(`select action, who from public.change_log where tbl = 'calendar_events' and record_id = $1 order by id`, [mine])).rows;
 ok(log.map((r) => r.action).join() === 'Added,Archived', 'adds and archives are in the change log: ' + log.map((r) => r.action).join(', '));
+// 0010: History files events under Calendar, named by title and date, and problem reports under Problems by page
+const area = (await db.query(`select what, label from public.change_log where tbl = 'calendar_events' and record_id = $1 order by id limit 1`, [mine])).rows[0];
+ok(area.what === 'Calendar' && /^Event · .+ · [A-Z][a-z]{2} \d{1,2}, \d{4}/.test(area.label), 'History names a calendar event: ' + area.what + ' / ' + area.label);
+const prl = (await db.query(`select public.log_area('problem_reports') a, public.log_label('problem_reports', '{"page":"/ledger","page_title":"Ledger","notes":"secret"}'::jsonb) l`)).rows[0];
+ok(prl.a === 'Problems' && prl.l === 'Problem report · Ledger', 'History names a problem report by its page only: ' + prl.a + ' / ' + prl.l);
 
 console.log(failed ? `\n${failed} check(s) failed` : '\nAll checks passed');
 process.exit(failed ? 1 : 0);
