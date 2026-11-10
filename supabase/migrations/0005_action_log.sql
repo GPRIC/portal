@@ -346,12 +346,17 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
-declare v_cols text;
+declare v_cols text; v_ok boolean;
 begin
   select string_agg(format('%I = r.%I', k, k), ', ') into v_cols
     from jsonb_object_keys(p_before) k
    where k not in ('id','created_at','received','sample') and (p_before -> k) is distinct from (p_after -> k);
   if v_cols is null then raise exception 'Nothing to put back'; end if;
+  -- only put back a change that is still the latest: if the record moved on since, refuse
+  execute format('select exists (select 1 from public.%I t where t.id::text = $2 and (select bool_and((to_jsonb(t) -> k) is not distinct from ($1 -> k)) from jsonb_object_keys($1) k where k not in (''id'',''created_at'',''received'',''sample'') and ($1 -> k) is distinct from ($3 -> k)))', p_tbl)
+    into v_ok using p_after, p_id, p_before;
+  if not v_ok then raise exception 'This record has changed since; roll back the later change first'; end if;
+  if p_tbl = 'bank_statements' then raise exception 'Lock the month again from Team Balances so its difference is checked'; end if;
   execute format('update public.%I t set %s from jsonb_populate_record(null::public.%I, $1) r where t.id::text = $2', p_tbl, v_cols, p_tbl)
     using p_before, p_id;
 end;
