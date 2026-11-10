@@ -49,9 +49,11 @@ export type Vote = Base & {
   meeting_id: string; item: string; request_id: string | null; result: 'Approved' | 'Declined'; yes: number; no: number; abstain: number;
   stepped_out: string[]; ballots: Record<string, Ballot> | null; note: string | null; sort: number;
 };
-export const REQUEST_STATUSES = ['Draft', 'Submitted', 'Board Vote', 'Approved', 'Declined', 'Paid', 'Receipts Due', 'Closed'] as const;
+export const REQUEST_STATUSES = ['Draft', 'Submitted', 'Board Vote', 'Approved', 'Declined', 'Paid', 'Receipts Due', 'Closed', 'Reviewed', 'Cancelled'] as const;
 export type RequestStatus = (typeof REQUEST_STATUSES)[number];
-export const REQUEST_TYPES = ['Pre-Approval', 'Reimbursement'] as const;
+export const REQUEST_TYPES = ['Pre-Approval', 'Reimbursement', 'Direct Expense'] as const;
+/** How a direct expense was paid (0006_requests_v2.sql). */
+export const DIRECT_PAY = ['Debit Card', 'Check'] as const;
 export type RequestType = (typeof REQUEST_TYPES)[number];
 export const PAY_METHODS = ['Zelle', 'Check', 'Debit Card', 'ACH'] as const;
 export type PayMethod = (typeof PAY_METHODS)[number];
@@ -60,13 +62,23 @@ export const REQUEST_CATEGORIES = ['Registration Fees', 'Robot Parts & Construct
 /** How a pre-approval is paid out. */
 export const PAY_TO = ['Vendor directly', 'Me by Zelle', 'Team EIN account', 'School or district'] as const;
 export type TeamRequest = Base & {
-  team_id: string; purpose: string; category: string | null; amount: number; pay_to: string | null; needed_by: string | null; submitted: string | null;
+  /** Null for a direct expense, which belongs to the fund it is charged to (charge_fund_id). */
+  team_id: string | null; purpose: string; category: string | null; amount: number; pay_to: string | null; needed_by: string | null; submitted: string | null;
   status: RequestStatus; interested_member_id: string | null; vote_id: string | null; paid_date: string | null; receipts_done: string | null;
   returned: number; decline_reason: string | null; created_by: string | null; notes: string | null;
   type: RequestType; vendor: string | null; purchase_date: string | null; zelle_contact: string | null; team_ledger_ref: string | null;
   receipt_path: string | null; receipt_name: string | null; certified: boolean; submitted_by_user: string | null;
   requestor_name: string | null; requestor_email: string | null; requestor_member_id: string | null;
   pay_method: PayMethod | null; pay_ref: string | null; declined_by: string | null; declined_at: string | null;
+  /** Direct expenses (0006): the fund charged, and the bookkeeper's review. */
+  charge_fund_id?: string | null; reviewed_at?: string | null; reviewed_by?: string | null;
+  /** Cancelled before payment (0006), and the replacement order links, both ways. */
+  cancel_reason?: string | null; cancelled_at?: string | null; cancelled_by?: string | null;
+  replaces_id?: string | null; replaced_by_id?: string | null;
+};
+/** Money back on a paid request (0006): a ledger 'in' row (source Refund) into the fund that paid it. */
+export type Refund = Base & {
+  request_id: string; amount: number; date: string; reason: 'Returned' | 'Cancelled'; note: string | null; ledger_id: string | null; by_name: string | null;
 };
 /** One board member's approval of a request (written only by approve_request). */
 export type Approval = { id: string; request_id: string; user_id: string; member_id: string | null; approver_name: string; approved_at: string; sample: boolean };
@@ -112,13 +124,15 @@ export type Db = {
   totals: Totals;
   /** The signed-in person's role (null only if access was removed mid-session). */
   role: Role | null;
+  /** May file a direct expense: the Treasurer, the bookkeeper, or an officer the Treasurer names (can_file_direct). */
+  canFileDirect: boolean;
   teams: Team[]; funds: Fund[]; board_members: Member[]; grants: Grant[]; donors: Donor[]; donations: Donation[];
   meetings: Meeting[]; meeting_votes: Vote[]; team_requests: TeamRequest[]; ledger: Ledger[]; receipts: Receipt[];
   accounts: Account[]; documents: Doc[];
   request_approvals: Approval[]; team_users: TeamUser[]; team_invites: TeamInvite[]; bank_statements: BankStatement[]; bank_lines: BankLine[];
-  zeffy_sync_log: ZeffySync[];
+  zeffy_sync_log: ZeffySync[]; request_refunds: Refund[];
 };
-export type TableName = Exclude<keyof Db, 'settings'>;
+export type TableName = Exclude<keyof Db, 'settings' | 'canFileDirect'>;
 export const TABLES: TableName[] = ['teams', 'funds', 'board_members', 'grants', 'donors', 'donations', 'meetings', 'meeting_votes',
   'team_requests', 'ledger', 'receipts', 'accounts', 'documents', 'request_approvals', 'team_users', 'team_invites', 'bank_statements',
-  'bank_lines', 'zeffy_sync_log'];
+  'bank_lines', 'zeffy_sync_log', 'request_refunds'];

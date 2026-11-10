@@ -7,6 +7,7 @@ export type Tone = 'gry' | 'grn' | 'red' | 'amb' | 'blu' | 'vio';
 
 export const ST: Record<string, Tone> = {
   Draft: 'gry', Submitted: 'blu', 'Board Vote': 'vio', Approved: 'grn', Paid: 'grn', 'Receipts Due': 'amb', Closed: 'gry', Declined: 'red',
+  Reviewed: 'blu', Cancelled: 'gry',
   Prospect: 'blu', Drafting: 'vio', Applied: 'amb', Awarded: 'grn',
 };
 

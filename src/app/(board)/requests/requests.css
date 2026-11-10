@@ -1,0 +1,48 @@
+/* Requests page (mockup #101). Page-scoped: classes start with rq- so they never collide with globals.css. */
+.rq-panel .rq-frow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 12px 14px 8px; }
+.rq-fp { display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px; border-radius: 999px; border: 1px solid transparent; background: transparent; color: var(--t2); cursor: pointer; white-space: nowrap; flex: none; font: inherit; }
+.rq-fp:hover { color: var(--t); }
+.rq-fp.on { color: var(--t); background: var(--inset); }
+.rq-fp.on.grn { border-color: rgba(var(--g-rgb), .45); }
+.rq-fp.on.amb { border-color: rgba(var(--amb-rgb), .45); }
+.rq-fp.on.vio { border-color: rgba(var(--vio-rgb), .45); }
+.rq-fp.on.blu { border-color: rgba(var(--blue-rgb), .45); }
+.rq-fp.on.red { border-color: rgba(var(--red-rgb), .45); }
+.rq-fp.on.gry { border-color: rgba(var(--gry-rgb), .45); }
+.rq-fdot { width: 7px; height: 7px; border-radius: 50%; background: var(--g); display: inline-block; }
+.rq-fwrap { position: relative; display: inline-flex; }
+.rq-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 45; background: var(--raised); border: 1px solid var(--bst); border-radius: var(--r); box-shadow: var(--shadow); padding: 12px; min-width: 300px; display: flex; flex-direction: column; gap: 8px; }
+.rq-pop .seg { flex-wrap: wrap; }
+.rq-lab { color: var(--t3); font-size: 12px; }
+.rq-srch { flex: none; width: 240px; }
+.rq-panel th { white-space: nowrap; }
+.rq-pr { display: inline-flex; align-items: center; gap: 8px; max-width: 340px; }
+.rq-pr .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rq-ty { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.rq-ty i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; }
+.rq-empty { padding: 48px 12px; text-align: center; color: var(--t3); white-space: normal; }
+.rq-empty b { display: block; color: var(--t); font-weight: 600; margin-bottom: 6px; font-size: 14px; }
+.rq-pager { display: flex; align-items: center; gap: 10px; padding: 10px 16px; white-space: nowrap; overflow-x: auto; }
+
+/* detail and forms (render in the modal host, outside the page) */
+.rq-inv { width: 100%; border: 1px solid var(--bs); border-radius: var(--r); overflow: hidden; border-collapse: separate; border-spacing: 0; }
+.rq-inv th { cursor: default; background: var(--inset); }
+.rq-inv td { padding: 7px 12px; }
+.rq-inv tbody tr:last-child td { border-bottom: none; }
+.rq-inv tfoot td { background: var(--inset); font-weight: 600; border-bottom: none; }
+.rq-inv .in { padding: 5px 8px; }
+.rq-lchip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px; border: 1px solid rgba(var(--blue-rgb), .4); background: rgba(var(--blue-rgb), .1); color: var(--blue); cursor: pointer; white-space: nowrap; font-size: 12px; font: inherit; }
+.rq-lchip:hover { background: rgba(var(--blue-rgb), .18); }
+.rq-box { border: 1px solid var(--bs); border-radius: var(--r); padding: 10px 12px; background: var(--inset); display: flex; gap: 16px; align-items: center; white-space: nowrap; flex-wrap: wrap; }
+.rq-box.amb { border-color: rgba(var(--amb-rgb), .55); }
+.rq-k2 { color: var(--t3); margin-right: 4px; }
+.rq-tl { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.rq-tl .st { color: var(--t3); font-size: 12px; }
+.rq-tl .ar2 { color: var(--hint); }
+.rq-picker { display: flex; flex-direction: column; gap: 2px; min-width: min(380px, 100%); }
+.rq-picker label { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px; cursor: pointer; }
+.rq-picker label:hover { background: var(--hover); }
+.rq-picker .bal { margin-left: auto; color: var(--t3); font-variant-numeric: tabular-nums; }
+.rq-tot { font-weight: 600; font-variant-numeric: tabular-nums; }
+.rq-fl { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 700px) { .rq-srch { width: 100%; } }

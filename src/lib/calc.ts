@@ -99,7 +99,28 @@ export class Calc {
   interestedMember(tid: string): Member | null {
     return this.board().find((m) => m.interest_team_id === tid) || null;
   }
-  needsVote(r: TeamRequest) { return r.status === 'Submitted' || r.status === 'Board Vote'; }
+  needsVote(r: TeamRequest) { return r.type !== 'Direct Expense' && (r.status === 'Submitted' || r.status === 'Board Vote'); }
+
+  /* requests v2 (0006): direct expenses, refunds, replacement orders */
+  isDirect(r: Pick<TeamRequest, 'type'>) { return r.type === 'Direct Expense'; }
+  /** A direct expense waiting for the bookkeeper's review. */
+  needsReview(r: TeamRequest) { return this.isDirect(r) && r.status === 'Submitted'; }
+  /** The fund a request is charged to: the chosen fund of a direct expense, or the team's fund. Mirrors request_fund(). */
+  requestFundId(r: TeamRequest) { return r.charge_fund_id || this.team(r.team_id)?.fund_id || null; }
+  /** "Charge To" as the Requests page shows it. */
+  chargeTo(r: TeamRequest) {
+    if (r.charge_fund_id) return r.charge_fund_id === this.db.settings.general_fund_id ? 'GPRIC General' : this.fundName(r.charge_fund_id);
+    return this.team(r.team_id)?.name || this.fundName(this.requestFundId(r)) || '—';
+  }
+  /** Funds a direct expense can be charged to: GPRIC General first, then the team funds. Mirrors direct_charge_ok(). */
+  directFunds(): Fund[] {
+    const gen = this.db.settings.general_fund_id;
+    const ok = this.db.funds.filter((f) => f.id === gen || f.team_id || this.db.teams.some((t) => t.fund_id === f.id));
+    return ok.sort((a, b) => (a.id === gen ? -1 : b.id === gen ? 1 : a.name.localeCompare(b.name)));
+  }
+  refundFor(rid: string) { return this.db.request_refunds.find((x) => x.request_id === rid) || null; }
+  /** The request's payment row in the ledger (one per request). */
+  paymentFor(rid: string) { return this.db.ledger.find((l) => l.request_id === rid && l.dir === 'out' && !l.reverses_id && !l.reversed_by_id) || null; }
 
   /* approvals (Requests v2) */
   approvalsFor(rid: string) { return this.db.request_approvals.filter((a) => a.request_id === rid).sort((a, b) => (a.approved_at < b.approved_at ? -1 : 1)); }
@@ -130,11 +151,15 @@ export class Calc {
   /** The kind of money an entry is; a reversal counts as the kind of the entry it undoes. */
   kindOf(l: Ledger): MoneyKind {
     const dir = l.reverses_id ? (l.dir === 'in' ? 'out' : 'in') : l.dir;
+    const req = l.request_id ? this.request(l.request_id) : null;
+    const spentKind: MoneyKind = !l.request_id || (req && this.isDirect(req)) ? 'Direct Expense' : 'Reimbursement';
     if (dir === 'in') {
       if (l.source === 'Opening Balance') return 'Carry-Over';
+      // a refund nets against the spending it returns (as portal_totals does)
+      if (l.source === 'Refund') return spentKind;
       return this.donation(l.donation_id)?.channel === 'Zeffy' ? 'Zeffy' : 'Deposit';
     }
-    return l.request_id ? 'Reimbursement' : 'Direct Expense';
+    return spentKind;
   }
   donation(id: string | null | undefined): Donation | null { return id ? this.db.donations.find((d) => d.id === id) || null : null; }
   fundMoney(f: Fund): MoneyRow {

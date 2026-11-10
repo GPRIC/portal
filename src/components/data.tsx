@@ -12,7 +12,7 @@ import { useUI } from './ui';
 
 const NUMERIC: Partial<Record<TableName, string[]>> = {
   grants: ['ask', 'awarded', 'received', 'likelihood'], donations: ['amount', 'refunded'], ledger: ['amount'], team_requests: ['amount', 'returned'],
-  receipts: ['amount'], accounts: ['cost'], bank_statements: ['ending_balance', 'difference'], bank_lines: ['amount'],
+  receipts: ['amount'], request_refunds: ['amount'], accounts: ['cost'], bank_statements: ['ending_balance', 'difference'], bank_lines: ['amount'],
 };
 /** Tables keyed by something other than a text id; rows get a string id so tables and lookups stay uniform. */
 const KEY: Partial<Record<TableName, string>> = { team_users: 'user_id' };
@@ -41,10 +41,11 @@ const numify = (o: unknown): unknown => (Array.isArray(o) ? o.map(numify)
 
 async function loadDb(): Promise<Db> {
   const sb = supabase();
-  const [settings, totals, role, ...rows] = await Promise.all([
+  const [settings, totals, role, canFile, ...rows] = await Promise.all([
     sb.from('settings').select('*').eq('id', 1).maybeSingle(),
     sb.rpc('portal_totals'),
     sb.rpc('my_role'),
+    sb.rpc('can_file_direct'),
     ...TABLES.map(fetchAll),
   ]);
   if (settings.error) throw new Error('settings: ' + settings.error.message);
@@ -53,6 +54,7 @@ async function loadDb(): Promise<Db> {
   db.settings.approval_threshold = Number(db.settings.approval_threshold ?? 500);
   db.totals = numify(totals.data) as Totals;
   db.role = (role.data as Role | null) || null;
+  db.canFileDirect = canFile.data === true;
   TABLES.forEach((t, i) => { (db as Record<string, unknown>)[t] = rows[i]; });
   return db;
 }

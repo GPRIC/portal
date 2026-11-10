@@ -148,6 +148,7 @@ function prefillFrom(r: TeamReq) {
 function stepsFor(p: Portal, r: TeamReq, today: string): Parameters<typeof Steps>[0]['list'] {
   const list: Parameters<typeof Steps>[0]['list'] = [['done', 'Submitted with your certification', sd(r.submitted)]];
   if (r.status === 'Declined') { list.push(['no', 'Declined' + (r.decline_reason ? ': ' + r.decline_reason : ''), '']); return list; }
+  if (r.status === 'Cancelled') { list.push(['no', 'Cancelled before payment; nothing was paid', '']); return list; }
   const past = r.status !== 'Submitted';
   for (let i = 0; i < r.needed; i++) {
     list.push([past || i < r.approvals ? 'done' : i === r.approvals ? 'now' : 'todo', 'Board approval ' + (i + 1) + ' of ' + r.needed, '']);
