@@ -12,6 +12,9 @@ export async function run({ db, as, fails, ok, B1, B2, B3, C }) {
   await as(B3, `select public.ledger_edit($1, '{"memo": "Bake sale"}')`, [led]);
   e = await last(`tbl = 'ledger' and record_id = $1`, [led]);
   ok(e.action === 'Changed' && e.before.memo === null && e.after.memo === 'Bake sale' && /Memo/.test(e.summary), 'a change is logged with before and after: ' + e.summary);
+  const led2 = await one(B3, `select public.ledger_add($1)`, [JSON.stringify({ date: '2026-10-08', dir: 'in', amount: 7, fund_id: 'F-GEN', source: 'Test Deposit' })]);
+  await as(B3, `select public.ledger_edit($1, '{"memo": "First memo"}')`, [led2]);
+  const memo1 = await last(`tbl = 'ledger' and record_id = $1`, [led2]);
   await as(B2, `insert into public.documents (title, type) values ('Log Test', 'Board')`);
   const doc = (await db.query(`select id from public.documents where title = 'Log Test'`)).rows[0].id;
   await as(B2, `update public.documents set title = 'Log Test 2' where id = $1`, [doc]);
@@ -84,7 +87,14 @@ export async function run({ db, as, fails, ok, B1, B2, B3, C }) {
   const named = tv.filter((r) => JSON.stringify([r.label, r.summary, r.before, r.after]).includes(anon.name));
   ok(tv.length > 0 && named.length === 0, `team rows never name an anonymous donor (${tv.length} gift rows)`);
   ok(tv.some((r) => /Anonymous/.test(r.label || '')), 'the anonymous gift shows as Anonymous');
-  ok(!tv.some((r) => ['donor_id', 'grant_id', 'donation_id'].some((k) => (r.before && k in r.before) || (r.after && k in r.after))), 'team rows carry no donor, gift or grant links');
+  ok(!tv.some((r) => ['donor_id', 'grant_id', 'donation_id', 'zeffy_key'].some((k) => (r.before && k in r.before) || (r.after && k in r.after))), 'team rows carry no donor, gift, grant or Zeffy key links');
+  const surname = anon.name.split(/\s+/).pop().toLowerCase();
+  ok(!tv.some((r) => JSON.stringify([r.label, r.summary, r.before, r.after]).toLowerCase().includes(surname)), `the donor's surname appears in no team row, any case ("${surname}")`);
+  // a very short name masks nothing and breaks nothing
+  ok((await db.query(`select public.log_team_mask_text('Gift from ANON Nym and anon', 'Anon') m`)).rows[0].m === 'Gift from Anonymous Nym and Anonymous', 'masking a name found inside "Anonymous" ends');
+  await db.query(`update public.donors set name = 'e' where id = $1`, [anon.id]);
+  ok((await as(C, `select count(*)::int n from public.change_log_team`)).rows[0].n === mine, 'a one-letter anonymous name does not break team History');
+  await db.query(`update public.donors set name = $2 where id = $1`, [anon.id, anon.name]);
   const bv = (await as(B2, `select label from public.change_log where tbl = 'donations' and record_id = (select id from public.donations where donor_id = $1 limit 1)`, [anon.id])).rows;
   ok(bv.some((r) => (r.label || '').includes(anon.name)), 'the board still sees the donor');
   await db.query(`update public.donors set anonymous = false where id = $1`, [anon.id]);
@@ -126,4 +136,16 @@ export async function run({ db, as, fails, ok, B1, B2, B3, C }) {
   ok(rq.status === paid.before.status, `rolling back a payment steps the request back to ${rq.status}`);
   ok((await db.query(`select count(*)::int n from public.ledger where request_id = $1 and dir = 'out' and reverses_id is null and reversed_by_id is null`, [paid.record_id])).rows[0].n === 0,
     'and its payment is reversed in the ledger');
+  // Closing a request returns unspent money to the team fund: rolling the close back would credit it twice, so it is refused.
+  const open_ = (await db.query(`select id from public.team_requests where status in ('Paid','Receipts Due') and archived_at is null order by id limit 1`)).rows[0];
+  if (open_) {
+    await as(B1, `select public.complete_request_receipts($1)`, [open_.id]);
+    const closed = await last(`tbl = 'team_requests' and record_id = $1 and (after ->> 'status') = 'Closed'`, [open_.id]);
+    const booked = (await db.query(`select count(*)::int n from public.ledger where request_id = $1 and source = 'Unspent Returned'`, [open_.id])).rows[0].n;
+    if (booked) await fails(B1, `select public.rollback_change($1, 'x')`, [closed.id], /booked money/, 'rolling back a close that returned money is refused');
+    else ok(true, 'close returned no money (nothing to double count)');
+  } else ok(false, 'no paid request left to test closing');
+  // A ledger description change that was edited again since is not overwritten.
+  await as(B3, `select public.ledger_edit($1, '{"memo": "Second memo"}')`, [led2]);
+  await fails(B1, `select public.rollback_change($1, 'x')`, [memo1.id], /changed since/, 'a ledger description roll back refuses once edited again');
 }

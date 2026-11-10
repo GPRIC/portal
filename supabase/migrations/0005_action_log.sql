@@ -338,6 +338,21 @@ end $$;
 
 -- ---------------------------------------------------------------- roll back (P25)
 
+-- Only a change that is still the latest can be undone: if the record moved on since, refuse.
+create or replace function public.log_still_latest(p_tbl text, p_before jsonb, p_after jsonb, p_id text)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare v_ok boolean;
+begin
+  execute format('select exists (select 1 from public.%I t where t.id::text = $2 and coalesce((select bool_and((to_jsonb(t) -> k) is not distinct from ($1 -> k)) from jsonb_object_keys($1) k where k not in (''id'',''created_at'',''received'',''sample'') and ($1 -> k) is distinct from ($3 -> k)), true))', p_tbl)
+    into v_ok using p_after, p_id, p_before;
+  if not v_ok then raise exception 'This record has changed since; roll back the later change first'; end if;
+end;
+$$;
+
 -- Put back every field of a record that a logged change changed (a grant's received money follows the ledger, so it stays).
 create or replace function public.log_restore(p_tbl text, p_before jsonb, p_after jsonb, p_id text)
 returns void
@@ -345,16 +360,13 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
-declare v_cols text; v_ok boolean;
+declare v_cols text;
 begin
   select string_agg(format('%I = r.%I', k, k), ', ') into v_cols
     from jsonb_object_keys(p_before) k
    where k not in ('id','created_at','received','sample') and (p_before -> k) is distinct from (p_after -> k);
   if v_cols is null then raise exception 'Nothing to put back'; end if;
-  -- only put back a change that is still the latest: if the record moved on since, refuse
-  execute format('select exists (select 1 from public.%I t where t.id::text = $2 and (select bool_and((to_jsonb(t) -> k) is not distinct from ($1 -> k)) from jsonb_object_keys($1) k where k not in (''id'',''created_at'',''received'',''sample'') and ($1 -> k) is distinct from ($3 -> k)))', p_tbl)
-    into v_ok using p_after, p_id, p_before;
-  if not v_ok then raise exception 'This record has changed since; roll back the later change first'; end if;
+  perform public.log_still_latest(p_tbl, p_before, p_after, p_id);
   if p_tbl = 'bank_statements' then raise exception 'Lock the month again from Team Balances so its difference is checked'; end if;
   execute format('update public.%I t set %s from jsonb_populate_record(null::public.%I, $1) r where t.id::text = $2', p_tbl, v_cols, p_tbl)
     using p_before, p_id;
@@ -411,6 +423,7 @@ begin
          or (e.before -> 'reversed_by_id') is distinct from (e.after -> 'reversed_by_id') then
         raise exception 'Money in the ledger is changed with a correction or reversal; roll back the entry that made it';
       end if;
+      perform public.log_still_latest('ledger', e.before, e.after, e.record_id);
       perform public.ledger_edit(e.record_id, e.before);
     else
       raise exception 'Ledger entries are never deleted; nothing to roll back';
@@ -433,6 +446,10 @@ begin
   elsif e.tbl = 'bank_lines' then
     if e.before is not null then raise exception 'Change a bank line from Team Balances'; end if;
     perform public.bank_line_archive(e.record_id, trim(p_reason));
+  elsif e.tbl = 'team_requests' and (e.before ->> 'status') is distinct from (e.after ->> 'status')
+        and exists (select 1 from public.ledger l where l.request_id = e.record_id and l.created_at >= e.at
+                       and l.reverses_id is null and l.reversed_by_id is null) then
+    raise exception 'This step booked money in the ledger (such as unspent money returned); reverse that ledger entry first';
   elsif e.tbl in ('request_approvals','portal_access','team_users') then
     raise exception 'This change is undone from its own page';
 
@@ -468,7 +485,7 @@ begin
     execute format('revoke all on function %s from public, anon', f);
     execute format('grant execute on function %s to authenticated', f);
   end loop;
-  foreach f in array array['public.change_log_guard()', 'public.log_who()', 'public.log_restore(text,jsonb,jsonb,text)', 'public.log_label(text,jsonb)', 'public.log_team(text,jsonb)',
+  foreach f in array array['public.change_log_guard()', 'public.log_who()', 'public.log_restore(text,jsonb,jsonb,text)', 'public.log_still_latest(text,jsonb,jsonb,text)', 'public.log_label(text,jsonb)', 'public.log_team(text,jsonb)',
                            'public.log_name_of(uuid)'] loop
     execute format('revoke all on function %s from public, anon, authenticated', f);
   end loop;
@@ -498,6 +515,29 @@ grant execute on function public.zeffy_upsert(jsonb, text) to authenticated, ser
 
 -- Teams read History through this view, not public.change_log: only their own team's rows, a donor who asked to stay
 -- anonymous shows as "Anonymous" (label, summary, before and after), and donor, gift and grant links are left out.
+create or replace function public.log_team_mask_text(t text, p_anon text)
+returns text
+language plpgsql
+immutable
+set search_path = ''
+as $$
+-- the full name, then each word of it three letters or longer, in any case; plain text matching (no patterns)
+declare w text; i int; v text := t;
+begin
+  if v is null or p_anon is null then return v; end if;
+  for w in select x from (select trim(p_anon) x, 0 o union all select y, 1 from regexp_split_to_table(trim(p_anon), '\s+') y) z
+            where length(x) >= 3 order by o, length(x) desc loop
+    -- a one-character marker stands in until the end, so a name found inside "Anonymous" can never match again
+    loop
+      i := position(lower(w) in lower(v));
+      exit when i = 0;
+      v := overlay(v placing chr(1) from i for length(w));
+    end loop;
+  end loop;
+  return replace(v, chr(1), 'Anonymous');
+end;
+$$;
+
 create or replace function public.log_team_mask(j jsonb, p_anon text)
 returns jsonb
 language sql
@@ -505,15 +545,15 @@ immutable
 set search_path = ''
 as $$
   select case when j is null then null
-              when p_anon is null then j - array['donor_id','grant_id','donation_id']
-              else replace((j - array['donor_id','grant_id','donation_id'])::text,
-                           trim(both '"' from to_jsonb(p_anon)::text), 'Anonymous')::jsonb end;
+              else (select coalesce(jsonb_object_agg(k, case when jsonb_typeof(v) = 'string' and p_anon is not null
+                                                            then to_jsonb(public.log_team_mask_text(v #>> '{}', p_anon)) else v end), '{}'::jsonb)
+                      from jsonb_each(j - array['donor_id','grant_id','donation_id','zeffy_key']) e(k, v)) end;
 $$;
 
 create view public.change_log_team with (security_barrier = true) as
 select c.id, c.at, c.user_id, c.who, c.role, c.action, c.what, c.tbl, c.record_id,
-       case when a.name is null then c.label else replace(c.label, a.name, 'Anonymous') end as label,
-       case when a.name is null then c.summary else replace(c.summary, a.name, 'Anonymous') end as summary,
+       public.log_team_mask_text(c.label, a.name) as label,
+       public.log_team_mask_text(c.summary, a.name) as summary,
        public.log_team_mask(c.before, a.name) as before,
        public.log_team_mask(c.after, a.name) as after,
        c.team_id, c.device, c.via, c.reason, c.rolls_back_id, c.rolled_back_at, c.rolled_back_by, c.rollback_reason
