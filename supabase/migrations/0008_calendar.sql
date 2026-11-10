@@ -58,6 +58,25 @@ create trigger calendar_events_no_delete before delete on public.calendar_events
 create trigger calendar_events_log after insert or update or delete on public.calendar_events
   for each row execute function public.log_change();
 
+-- An event's kind and team never change, whoever asks (owner included). The change log files each row under the
+-- record's team, with the full record before and after; a board meeting turned team event, or an event moved from
+-- one team to another, would show its earlier details to that team's login. Archive it and add a new one instead.
+create or replace function public.calendar_owner_fixed()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if new.kind is distinct from old.kind or new.team_id is distinct from old.team_id then
+    raise exception 'An event''s kind and team cannot change. Archive it and add a new one instead' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.calendar_owner_fixed() from public, anon, authenticated;
+create trigger calendar_events_owner_fixed before update of kind, team_id on public.calendar_events
+  for each row execute function public.calendar_owner_fixed();
+
 -- ---------------------------------------------------------------- who may change an event
 
 -- Raises unless the caller may change this event: officers any event, a team login only its own team's schedule.
@@ -103,7 +122,7 @@ $$;
 
 -- Add or change an event. Returns the ids written (more than one for a weekly repeat).
 -- p: {id?, kind, team_id, type, title, date, start_time, end_time, location, notes, repeat ('weekly' or none), until?}
--- A team login's events are always for its own team; on a change, kind and team stay its own.
+-- A team login's events are always for its own team. On a change, kind and team must stay as they are.
 create or replace function public.calendar_save(p jsonb)
 returns text[]
 language plpgsql
@@ -152,6 +171,10 @@ begin
     select * into old from public.calendar_events e where e.id = p ->> 'id' and e.archived_at is null for update;
     if not found then raise exception 'Event not found or archived'; end if;
     perform public.calendar_can_change(old.kind, old.team_id);   -- may change the event as it stands
+    -- An event keeps its kind and team for life, so its history never crosses from the board or one team to another.
+    if v_kind is distinct from old.kind or v_team is distinct from old.team_id then
+      raise exception 'An event''s kind and team cannot change. Archive it and add a new one instead';
+    end if;
     update public.calendar_events set
       kind = v_kind, team_id = v_team, type = v_type, title = v_title, date = v_date, start_time = v_start, end_time = v_end,
       location = nullif(trim(coalesce(p ->> 'location', '')), ''), notes = nullif(trim(coalesce(p ->> 'notes', '')), '')

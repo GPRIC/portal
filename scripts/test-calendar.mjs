@@ -107,6 +107,34 @@ await fails(C, `select public.calendar_archive($1)`, [comm], /own team/, 'a coac
 await fails(C, `select public.calendar_save($1)`, [JSON.stringify({ id: mine, kind: 'board', date: '2026-12-13' })], /own team/, 'a coach cannot turn their event into a board meeting');
 ok((await db.query(`select date::text d from public.calendar_events where id = $1`, [mine])).rows[0].d === '2026-12-13', 'the event is unchanged');
 
+// An event never changes kind or team, so its history never reaches another team.
+const [secret] = await save(B, { kind: 'board', title: 'Secret Exec Session', notes: 'Personnel matter', date: '2026-11-26' });
+await fails(B, `select public.calendar_save($1)`, [JSON.stringify({ id: secret, kind: 'team', team_id: 'T-9255', type: 'Practice', date: '2026-11-26' })],
+  /cannot change.*Archive it and add a new one/, 'an officer cannot turn a board meeting into a team event');
+await fails(B, `select public.calendar_save($1)`, [JSON.stringify({ id: secret, kind: 'community', title: 'Secret Exec Session', date: '2026-11-26' })],
+  /cannot change/, 'nor into a community event');
+await fails(B, `select public.calendar_save($1)`, [JSON.stringify({ id: prac, kind: 'team', team_id: otherTeam, type: 'Practice', date: '2026-11-10' })],
+  /cannot change.*Archive it and add a new one/, 'an officer cannot move an event from one team to another');
+await fails(B, `select public.calendar_save($1)`, [JSON.stringify({ id: prac, kind: 'board', date: '2026-11-10' })], /cannot change/, 'nor turn a team event into a board meeting');
+try { await db.exec(`update public.calendar_events set kind = 'team', team_id = 'T-9255', type = 'Practice' where id = '${secret}'`); ok(false, "even the owner cannot change an event's kind or team (no error)"); }
+catch (x) { ok(/cannot change/.test(x.message), "even the owner cannot change an event's kind or team"); }
+try { await db.exec(`update public.calendar_events set team_id = '${otherTeam}' where id = '${prac}'`); ok(false, 'even the owner cannot move an event between teams (no error)'); }
+catch (x) { ok(/cannot change/.test(x.message), 'even the owner cannot move an event between teams'); }
+ok((await db.query(`select kind, team_id from public.calendar_events where id = $1`, [secret])).rows[0].kind === 'board' &&
+   (await db.query(`select team_id from public.calendar_events where id = $1`, [prac])).rows[0].team_id === 'T-9255', 'both events are unchanged');
+const leakC = (await as(C, `select count(*)::int n from public.change_log_team where tbl = 'calendar_events'
+  and (record_id = $1 or coalesce(before ->> 'title', '') = 'Secret Exec Session' or coalesce(after ->> 'title', '') = 'Secret Exec Session')`, [secret])).rows[0].n;
+ok(leakC === 0, "the board meeting's details never reach the coach's History");
+const leakO = (await as(O, `select count(*)::int n from public.change_log_team where tbl = 'calendar_events' and (record_id = $1
+  or coalesce(before ->> 'team_id', '') = 'T-9255' or coalesce(after ->> 'team_id', '') = 'T-9255')`, [prac])).rows[0].n;
+ok(leakO === 0, "one team's event details never reach another team's History");
+ok((await db.query(`select count(*)::int n from public.change_log where tbl = 'calendar_events' and team_id is not null
+  and (coalesce(before ->> 'team_id', after ->> 'team_id') is distinct from team_id or coalesce(after ->> 'team_id', before ->> 'team_id') is distinct from team_id)`)).rows[0].n === 0,
+  'every calendar log row is filed under the same team before and after');
+// Ordinary edits still work and keep the team.
+await save(B, { id: prac, kind: 'team', team_id: 'T-9255', type: 'Scrimmage', title: 'Scrimmage', date: '2026-11-10' });
+ok((await db.query(`select type from public.calendar_events where id = $1`, [prac])).rows[0].type === 'Scrimmage', 'changing the type, title or date still works');
+
 // Archive, never delete; logged.
 await as(C, `select public.calendar_archive($1, 'Cancelled')`, [mine]);
 const arc = (await db.query(`select archived_at, archived_by, archive_reason from public.calendar_events where id = $1`, [mine])).rows[0];

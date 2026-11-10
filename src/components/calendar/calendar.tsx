@@ -281,6 +281,8 @@ function Detail({ c, e, depth }: { c: Ctx; e: CalEvent; depth: number }) {
   );
 }
 
+const LOCKED = 'An event keeps its kind and team. To change them, archive this event and add a new one.';
+
 type Form = { kind: CalKind; type: CalType; team_id: string; title: string; date: string; start: string; end: string; location: string; notes: string; weekly: boolean };
 
 function Editor({ c, ev, viewed, today, depth, onSaved }: {
@@ -320,22 +322,40 @@ function Editor({ c, ev, viewed, today, depth, onSaved }: {
     ui.toast(ev ? 'Event updated' : n > 1 ? n + ' weekly events added to the calendar' : 'Event added to the calendar');
   };
 
+  const archive = async () => {
+    if (!ev) return;
+    const why = await ui.ask({ title: 'Archive Event', body: <>Take {evFull(c, ev)} on {longDate(ev.date)} off the calendar? It stays in History.</>, ok: 'Archive Event', danger: true, optional: true, label: 'Reason', placeholder: 'Cancelled, moved, added by mistake' });
+    if (why === null) return;
+    setBusy(true);
+    const { error } = await supabase().rpc('calendar_archive', { p_id: ev.id, p_reason: why });
+    setBusy(false);
+    if (error) { setMsg(/row-level security|permission denied/i.test(error.message) ? 'Not allowed. Sign in again with your two-step code.' : error.message); return; }
+    await c.reload();
+    for (let i = 0; i < depth; i++) ui.close();
+    ui.toast('Event archived');
+  };
+
   return (
     <Modal wide title={ev ? 'Edit Event' : 'Add Event'} foot={<>
-      <button className="btn" onClick={ui.close}>Cancel</button>
-      <button className="btn pri" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+      <span>{ev ? <button className="btn dan" onClick={archive} disabled={busy} title="Takes the event off the calendar. It stays in History.">Archive Event</button> : null}</span>
+      <span className="btnrow">
+        <button className="btn" onClick={ui.close}>Cancel</button>
+        <button className="btn pri" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+      </span>
     </>}>
       <div className="k">Kind</div>
       <div className="seg cal-seg">
-        {KIND_KEYS.map((k) => (coach && k !== 'team'
+        {KIND_KEYS.map((k) => (ev && k !== f.kind
+          ? <span key={k} className="dis" title={LOCKED}><button type="button" className="opt" disabled>{KINDS[k].one}</button></span>
+          : coach && k !== 'team'
           ? <span key={k} className="dis" title={'Only officers can add ' + KINDS[k].label.toLowerCase()}><button type="button" className="opt" disabled>{KINDS[k].one}</button></span>
-          : <button type="button" key={k} className={'opt' + (f.kind === k ? ' on' : '')} onClick={() => set({ kind: k })}>{KINDS[k].one}</button>))}
+          : <button type="button" key={k} className={'opt' + (f.kind === k ? ' on' : '')} onClick={() => { if (!ev) set({ kind: k }); }}>{KINDS[k].one}</button>))}
       </div>
       {f.kind === 'team' ? (
         <>
           <div className="k">Team</div>
-          <div>{coach
-            ? <span title="Coaches add events for their own team only"><input className="in" value={c.myTeam?.name || ''} disabled /></span>
+          <div>{coach || ev
+            ? <span title={ev ? LOCKED : 'Coaches add events for their own team only'}><input className="in" value={(coach ? c.myTeam?.name : c.teams.find((t) => t.id === f.team_id)?.name) || ''} disabled /></span>
             : (
               <select className="in" value={f.team_id} onChange={(e) => set({ team_id: e.target.value })}>
                 {c.teams.slice().sort((a, b) => a.name.localeCompare(b.name)).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
