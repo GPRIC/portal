@@ -14,7 +14,8 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
 const AMT = /(?<![\d/])(\d{1,3}(?:,\d{3})*|\d*)\.\d\d(?!\d)/g;
 const money = (s) => Math.round(Number(s.replace(/,/g, '')) * 100);
 const DATE = /^\s*(\d\d)\/(\d\d)\b/;
-const NOISE = /Please See Additional|Page \d+ of|Continued|May include checks|Total (Checks|Debits|Deposits)|Previous Balance|Daily Balance|^\s*[-+=]\s*$|^\s*Date\s+Amount|^\s*Check #|^\s*Debits \*\*|^\s*Deposits & Credits/;
+const FIX = fs.existsSync(path.join(DIR, 'corrections.json')) ? JSON.parse(fs.readFileSync(path.join(DIR, 'corrections.json'), 'utf8')) : {};
+const NOISE =/Please See Additional|Page \d+ of|Continued|May include checks|Total (Checks|Debits|Deposits)|Previous Balance|Daily Balance|^\s*[-+=]\s*$|^\s*Date\s+Amount|^\s*Check #|^\s*Debits \*\*|^\s*Deposits & Credits/;
 
 function parse(file) {
   const text = fs.readFileSync(path.join(TXT, file), 'utf8');
@@ -68,7 +69,20 @@ function parse(file) {
     }
   }
   open = open.filter((r) => r.cents == null);
-  return { file, year, month, opening, closing, lines, missing: open.length + lines.filter((l) => !l.date).length };
+  // Known layout slips, kept privately (private/statements/corrections.json) and proved by the daily balances below.
+  const key = `${year}-${String(month).padStart(2, '0')}`;
+  for (const c of FIX[key] || []) {
+    const hit = lines.filter((l) => l.description.includes(c.match));
+    if (hit.length !== 1) throw new Error(`${key}: correction "${c.match}" matches ${hit.length} lines`);
+    if (c.amount != null) { hit[0].cents = Math.sign(hit[0].cents || 1) * Math.round(c.amount * 100); open = open.filter((r) => r !== hit[0]); }
+    if (c.date) hit[0].date = c.date;
+  }
+  // The statement's Daily Balance table: every end-of-day balance it prints. Its columns do not line up in the
+  // text, so it is read as a set of figures, and each day's running balance from the parsed lines must be one of
+  // them. This catches an amount given to the wrong line within a month (the month total alone cannot).
+  const di = text.indexOf('Daily Balance');
+  const daily = new Set(di < 0 ? [] : [...text.slice(di, di + 3000).split(/Checking Account Balance Worksheet|\f/)[0].matchAll(AMT)].map((x) => money(x[0])));
+  return { file, year, month, opening, closing, lines, daily, missing: open.length + lines.filter((l) => !l.date).length };
 }
 
 const files = fs.readdirSync(TXT).filter((f) => f.endsWith('.txt'));
@@ -79,9 +93,12 @@ st.forEach((s, i) => {
   const next = st[i + 1];
   const want = next ? next.opening : s.closing;
   s.ending = s.opening + sum;
-  const okay = !s.missing && want != null && s.ending === want;
+  // end-of-day balances; a day the table does not print is a miss
+  const days = [...new Set(s.lines.map((l) => l.date))].sort();
+  const offDays = s.daily.size ? days.filter((d) => !s.daily.has(s.opening + s.lines.filter((l) => l.date <= d).reduce((t, l) => t + (l.cents ?? 0), 0))) : [];
+  const okay = !s.missing && want != null && s.ending === want && !offDays.length;
   if (!okay) bad++;
-  console.log(`${okay ? 'OK  ' : 'BAD '}${s.year}-${String(s.month).padStart(2, '0')}  open ${(s.opening / 100).toFixed(2)}  lines ${s.lines.length}  net ${(sum / 100).toFixed(2)}  end ${(s.ending / 100).toFixed(2)}  expected ${want == null ? '?' : (want / 100).toFixed(2)}${s.missing ? `  ${s.missing} line(s) without an amount` : ''}`);
+  console.log(`${okay ? 'OK  ' : 'BAD '}${s.year}-${String(s.month).padStart(2, '0')}  open ${(s.opening / 100).toFixed(2)}  lines ${s.lines.length}  net ${(sum / 100).toFixed(2)}  end ${(s.ending / 100).toFixed(2)}  expected ${want == null ? '?' : (want / 100).toFixed(2)}${s.missing ? `  ${s.missing} line(s) without an amount` : ''}${offDays.length ? `  daily balance off on ${offDays.join(', ')}` : ''}`);
 });
 if (bad) { console.log(`\n${bad} month(s) do not add up; nothing written.`); process.exit(1); }
 
