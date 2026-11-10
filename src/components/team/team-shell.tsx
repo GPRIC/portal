@@ -12,6 +12,7 @@ import { UIHost, UIProvider, useUI } from '@/components/ui';
 import { Tip, TipsProvider } from '@/components/tips';
 import { TeamDataProvider, useTeam } from './team-data';
 import { ProfileForm } from './team-forms';
+import { ReportProblem } from '@/components/problems/report-problem';
 
 export function TeamApp({ user, children }: { user: User; children: ReactNode }) {
   return (
@@ -39,6 +40,7 @@ function TeamTopBar({ email }: { email: string }) {
       <span className="area">Team</span>
       <span className="chip team-chip" title={p.team.name}><span className="dot" style={{ background: 'var(--g)' }} />{p.team.short || p.team.name}</span>
       <span className="sp" />
+      <ReportProblem who={me + ' (' + (p.team.short || p.team.name) + ')'} role={p.me.role ? p.me.role + ' login' : 'Team login'} />
       <span className="chip who" tabIndex={0}>
         <span className="av grn">{initials(me)}</span><span className="who-name">{me}</span>
         <span className="pop r">Signed in as {p.me.email || email}.{p.me.role ? ' ' + p.me.role + ' login' : ' Team login'} for {p.team.name}. Two-step sign-in is on.</span>
