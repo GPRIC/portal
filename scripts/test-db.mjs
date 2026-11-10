@@ -187,9 +187,11 @@ await fails(X, `select public.team_portal()`, [], /Team sign-in/, 'outsider has 
 
 // Clear sample data still runs (the locked month's sample rows stay, the lock holds).
 await import('./test-money.mjs').then((m) => m.run({ db, as, fails, ok, B1, B2, B3, C, bs, reqP }));
+await import('./test-log.mjs').then((m) => m.run({ db, as, fails, ok, B1, B2, B3, C }));
 await db.exec(`select set_config('gpric.via', 'unlock', false); update public.bank_statements set locked_at = null; select set_config('gpric.via', '', false);`);
 const cl = (await as(B1, `select public.clear_sample_data() c`)).rows[0].c;
 ok(cl.ledger > 0, 'clear sample data runs ' + JSON.stringify(cl));
+ok((await db.query(`select count(*)::int n from public.change_log where action = 'Deleted' and user_id = $1`, [BOARD1])).rows[0].n > 0, 'deletes (sample clear) are logged with the person');
 
 console.log(failed ? `\n${failed} check(s) failed` : '\nAll checks passed');
 process.exit(failed ? 1 : 0);

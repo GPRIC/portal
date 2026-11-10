@@ -196,3 +196,50 @@ textarea.in { min-height: 70px; resize: vertical; }
 .sev { border-radius: 6px; padding: 7px 10px; font-size: 12px; line-height: 1.45; }
 .info { display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; background: rgba(var(--gry-rgb), .18); color: var(--t2); font-size: 10px; font-weight: 600; cursor: help; margin-left: 5px; vertical-align: 1px; }
 .reqhead { display: flex; gap: 8px; align-items: center; white-space: nowrap; flex-wrap: wrap; }
+
+/* ---------- History (mockup #85 v2) ---------- */
+.hist .frow { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; overflow-x: auto; padding: 14px 16px 8px; scrollbar-width: none; }
+.hist .fp { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: 999px; border: 1px solid transparent; background: transparent; color: var(--t2); cursor: pointer; white-space: nowrap; flex: none; font: inherit; }
+.hist .fp:hover { color: var(--t); }
+.hist .fp.on { background: rgba(var(--g-rgb), .12); color: var(--g); }
+.hist .fp .fk { color: inherit; opacity: .75; }
+.hist .fp .clr { margin-left: 2px; opacity: .7; }
+.hist .fp .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--g); display: inline-block; }
+.hist .fp.more { margin-left: 8px; }
+.hist .fwrap { position: relative; flex: none; }
+.hist .srch { flex: none; width: 220px; margin-left: auto; background: transparent; border-color: var(--bs); }
+.hist th { font-size: 12px; padding: 8px 16px; }
+.hist td { padding: 13px 16px; border-bottom-color: color-mix(in srgb, var(--bs) 45%, transparent); }
+.hist .act { display: inline-flex; align-items: center; gap: 7px; }
+.hist .act i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; display: inline-block; }
+.hist .rbt { color: var(--amb); font-size: 11px; margin-left: 8px; }
+.hist .rec { max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+.hist .chg { color: var(--t2); max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
+.hist tr.rb td { opacity: .55; }
+.hist .hempty { padding: 48px 12px; text-align: center; color: var(--t3); white-space: normal; }
+.hist .hempty b { display: block; color: var(--t); font-weight: 600; margin-bottom: 6px; font-size: 14px; }
+.hist .pager { display: flex; align-items: center; gap: 10px; padding: 10px 16px; white-space: nowrap; overflow-x: auto; }
+.hmenu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 45; background: var(--raised); border: 1px solid var(--bst); border-radius: 10px; box-shadow: var(--shadow); padding: 12px; width: 320px; white-space: normal; }
+.hmenu .grp { margin-bottom: 12px; }
+.hmenu .gh { color: var(--t3); font-size: 12px; margin-bottom: 6px; }
+.hmenu .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.hmenu .fp { border: 1px solid var(--bs); padding: 3px 10px; font-size: 12px; }
+.hmenu .fp.on { border-color: rgba(var(--g-rgb), .35); }
+.hmenu .ft { display: flex; align-items: center; border-top: 1px solid var(--bs); padding-top: 8px; }
+.lnk { color: var(--g); cursor: pointer; background: none; border: none; padding: 0; text-decoration: none; font: inherit; }
+.lnk:hover { text-decoration: underline; }
+.who-line { display: inline-flex; align-items: center; gap: 7px; }
+.rec-line { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.diff { width: 100%; border: 1px solid var(--bs); border-radius: var(--r); overflow: hidden; border-collapse: separate; border-spacing: 0; }
+.diff th { cursor: default; background: var(--inset); }
+.diff td { vertical-align: top; white-space: normal; min-width: 150px; word-break: break-word; }
+.diff td.f { color: var(--t3); white-space: nowrap; min-width: 0; }
+.diff tr.ch td { background: rgba(var(--blue-rgb), .08); }
+.diff tr.ch td.f { color: var(--blue); font-weight: 500; }
+.diff tr:last-child td { border-bottom: none; }
+.diff .old { color: var(--red); text-decoration: line-through; text-decoration-color: rgba(var(--red-rgb), .5); }
+.diff .new { color: var(--g); }
+.diff .none, .hist .none { color: var(--hint); }
+.btn.amb-btn { background: rgba(var(--amb-rgb), .15); color: var(--amb); border-color: rgba(var(--amb-rgb), .4); }
+.btn.amb-btn:hover { background: rgba(var(--amb-rgb), .22); }
+@media (max-width: 700px) { .hist .srch { width: 160px; } }

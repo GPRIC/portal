@@ -12,6 +12,8 @@ export async function openDb() {
     create schema auth; create schema storage;
     grant usage on schema auth, storage, public to anon, authenticated, service_role;
     create table auth.users (id uuid primary key, email text, invited_at timestamptz, raw_user_meta_data jsonb default '{}');
+    create table auth.sessions (id uuid primary key, user_id uuid, created_at timestamptz default now(), updated_at timestamptz,
+                                aal text, user_agent text, ip text);
     create function auth.jwt() returns jsonb language sql stable as $$ select coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb $$;
     create function auth.uid() returns uuid language sql stable as $$ select nullif(auth.jwt() ->> 'sub', '')::uuid $$;
     grant execute on all functions in schema auth to anon, authenticated, service_role;

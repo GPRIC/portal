@@ -1152,10 +1152,13 @@ declare n int;
 begin
   perform public.require_role(array['treasurer','board','bookkeeper'], 'Adding bank lines');
   perform public.via('bank');
+  -- more than one line at once is a statement import (the action log records it as System, started by this person)
+  if jsonb_array_length(coalesce(p_rows, '[]'::jsonb)) > 1 then perform set_config('gpric.job', 'Bank statement import', true); end if;
   insert into public.bank_lines (statement_id, date, description, amount)
   select p_statement_id, (x ->> 'date')::date, nullif(trim(x ->> 'description'), ''), round((x ->> 'amount')::numeric, 2)
     from jsonb_array_elements(coalesce(p_rows, '[]'::jsonb)) x;
   get diagnostics n = row_count;
+  perform set_config('gpric.job', '', true);
   return n;
 end;
 $$;

@@ -16,6 +16,7 @@ import { TipsProvider } from './tips';
 export const NAV: [string, string][] = [
   ['/dashboard', 'Dashboard'], ['/grants', 'Grants'], ['/donors', 'Donors'], ['/requests', 'Team Requests'],
   ['/balances', 'Team Balances'], ['/ledger', 'Ledger'], ['/accounts', 'Accounts'], ['/documents', 'Documents'], ['/meetings', 'Meetings'],
+  ['/history', 'History'],
 ];
 
 export function BoardApp({ user, children }: { user: User; children: ReactNode }) {

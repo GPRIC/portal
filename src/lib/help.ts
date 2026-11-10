@@ -14,6 +14,16 @@ export const HELP: Record<string, About> = {
     ],
     who: WHO,
   },
+  history: {
+    purpose: 'Every action in the portal, recorded by the database itself: adds, changes, archives, approvals, payments, imports, month locks, invites, sign-ins and sign-outs. Nothing is left out and nothing can be edited or removed.',
+    steps: [
+      'History opens on the last 7 days. Pick Last 30 Days or All Time, or open Filters to narrow by who, what or action. Search finds a record, a person or a change.',
+      'Click a row to see the record before and after the change, field by field, the device it came from, and a link to every change ever made to that record.',
+      'Imports and automatic jobs (the Zeffy sync, a statement import) show as System, with who started them.',
+      'The Treasurer can roll back a change, with a reason. Money is never edited in place: a ledger entry is reversed, a payment is reversed before its request steps back, and a reconciled month is unlocked. The roll back is itself a new row in History.',
+    ],
+    who: WHO + ' Team logins see their own team’s history, read only.',
+  },
   ledger: {
     purpose: 'Every dollar in and out, by fund, with cash on hand split into restricted and unrestricted money. The accounting software stays the official books; this is the working ledger.',
     steps: [
