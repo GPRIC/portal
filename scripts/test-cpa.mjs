@@ -84,14 +84,17 @@ ok(JSON.stringify(totals) === JSON.stringify(await one(T, `select public.portal_
 ok((await one(C, `select public.bank_month_figures('2026-10-01')`)).book != null, 'bank_month_figures for the CPA');
 ok(typeof (await one(C, `select public.bank_month_difference($1, 0)`, [stmt])) !== 'undefined', 'bank_month_difference for the CPA');
 
-// History: the books' log rows, nothing about team logins, the calendar, problem reports or sign-ins.
+// History: the books' log rows, nothing about team logins, the calendar, problem reports, sign-ins, board access or board members' details.
 await db.exec(`insert into auth.sessions (id, user_id, aal) values ('00000000-0000-0000-0000-00000000aaaa', '${TREAS}', 'aal2')`);
-const logAll = Number((await q(`select count(*) n from public.change_log where tbl not in ('team_users','team_invites','calendar_events','problem_reports','sessions','seen_tips')`))[0].n);
+await db.exec(`insert into public.board_members (name, title, email) values ('Sample Member', 'Director', 'member@example.test')`);
+await db.exec(`update public.portal_access set name = 'Sample CPA Two' where user_id = '${CPA}'`);
+const logAll = Number((await q(`select count(*) n from public.change_log where tbl not in ('team_users','team_invites','calendar_events','problem_reports','sessions','seen_tips','portal_access','board_members')`))[0].n);
 ok(Number(await one(C, `select count(*) from public.change_log`)) === logAll && logAll > 0, `History: the CPA reads the books' log (${logAll} rows)`);
-for (const t of ['calendar_events', 'problem_reports', 'team_invites', 'team_users', 'sessions']) {
+for (const t of ['calendar_events', 'problem_reports', 'team_invites', 'team_users', 'sessions', 'portal_access', 'board_members']) {
   ok(Number((await q(`select count(*) n from public.change_log where tbl = $1`, [t]))[0].n) > 0, `there is ${t} history to hide`);
   ok(Number(await one(C, `select count(*) from public.change_log where tbl = $1`, [t])) === 0, `History hides ${t} from the CPA`);
 }
+ok(Number(await one(C, `select count(*) from public.change_log where coalesce(before::text, '') || coalesce(after::text, '') || coalesce(label, '') || coalesce(summary, '') ilike '%member@example.test%'`)) === 0, 'no board member email anywhere in the CPA History');
 ok(Number(await one(C1, `select count(*) from public.change_log`)) === 0, 'no History without two-step');
 
 // Not for the CPA.

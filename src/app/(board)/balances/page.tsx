@@ -19,7 +19,7 @@ import './balances.css';
 type Row = MoneyRow & { id: string; name: string; dup: boolean };
 
 export default function BalancesPage() {
-  const { db, calc, canExport } = useData();
+  const { db, calc, canExport, role } = useData();
   const ui = useUI();
   const [month, setMonth] = useState<string | null>(null);
   const g = calc.grants();
@@ -48,9 +48,13 @@ export default function BalancesPage() {
   ];
 
   return (
-    <Page title="Team Balances" help="balances" tools={canExport ? <>
-      <ListExport name="Team Balances" cols={cols} rows={rows} />
-      <button className="btn" onClick={() => ui.open(<YearExportModal />)} title="One workbook for a whole year: ledger, donations, requests, bank months and fund balances">Year Export</button>
+    <Page title="Team Balances" help="balances" tools={<>
+      {canExport ? <>
+        <ListExport name="Team Balances" cols={cols} rows={rows} />
+        <button className="btn" onClick={() => ui.open(<YearExportModal />)} title="One workbook for a whole year: ledger, donations, requests, bank months and fund balances">Year Export</button>
+      </> : null}
+      {/* The Quarterly Export stays with every board role, as before P35, and the CPA */}
+      {canExport || role === 'board' ? <>
       <Tip id="balances.export" side="r" text="Each quarter, save every record to one spreadsheet for the accountant and the board archive.">
         <Hint r tip="A permanent copy of the books for tax preparation and the board archive">
           <button className="btn" onClick={() => ui.open(<ExportModal />)}>
@@ -59,7 +63,8 @@ export default function BalancesPage() {
           </button>
         </Hint>
       </Tip>
-    </> : null}>
+      </> : null}
+    </>}>
       <div className="panel bal-table">
         <Table cols={cols} rows={rows} sort="balance" dir={-1} onRow={(r) => ui.open(<TeamModal fundId={r.fund.id} />)} empty="No funds yet."
           foot={<tr>

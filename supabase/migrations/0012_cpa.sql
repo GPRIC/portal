@@ -63,7 +63,9 @@ end $$;
 -- History: the CPA sees the log of what it can read. Team logins, invites, the calendar, problem reports and sign-ins stay out.
 create policy cpa_log_books_only on public.change_log as restrictive for select to authenticated
   using (not (select public.is_cpa())
-         or tbl not in ('team_users','team_invites','calendar_events','problem_reports','sessions','seen_tips'));
+         or tbl not in ('team_users','team_invites','calendar_events','problem_reports','sessions','seen_tips',
+                        -- board access and board member records carry names, emails and roles
+                        'portal_access','board_members'));
 
 -- ---------------------------------------------------------------- never write
 
