@@ -234,13 +234,13 @@ function VoteForm({ meetingId, id }: { meetingId: string; id?: string }) {
 }
 
 function MembersList() {
-  const { db, calc } = useData();
+  const { db, calc, readOnly } = useData();
   const ui = useUI();
   const cols: Col<Member>[] = [
     { k: 'sort', label: 'Seat', num: true, html: (m) => String(m.sort) },
     { k: 'title', label: 'Title' },
     { k: 'name', label: 'Name' },
-    { k: 'email', label: 'Email' },
+    ...(readOnly ? [] : [{ k: 'email', label: 'Email' }]),
     { k: 'interest', label: 'Team Interest', sv: (m) => calc.team(m.interest_team_id)?.short || '', html: (m) => calc.team(m.interest_team_id)?.short || '' },
     { k: 'active', label: 'Votes', html: (m) => (m.active ? <Badge tone="grn">Active</Badge> : <Badge>Former</Badge>) },
   ];

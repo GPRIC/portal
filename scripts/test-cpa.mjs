@@ -68,12 +68,53 @@ ok(await one(C1, `select public.can_read_books()`) === false, 'cannot read the b
 const BOOKS = ['settings', 'teams', 'funds', 'board_members', 'grants', 'donors', 'donations', 'meetings', 'meeting_votes', 'team_requests',
   'ledger', 'receipts', 'accounts', 'documents', 'request_approvals', 'bank_statements', 'bank_lines', 'zeffy_skip', 'zeffy_sync_log',
   'request_refunds', 'receipt_reminders', 'money_overrides'];
+// Tables with contact columns: the CPA reads them only through <table>_cpa, contact columns null.
+const MASKED = ['board_members', 'donors', 'team_requests', 'accounts'];
 for (const t of BOOKS) {
+  const src = MASKED.includes(t) ? t + '_cpa' : t;
   const all = Number((await q(`select count(*) n from public.${t}`))[0].n);
-  const seen = Number(await one(C, `select count(*) from public.${t}`));
-  ok(seen === all, `CPA reads every row of ${t} (${seen} of ${all})`);
-  ok(Number(await one(C1, `select count(*) from public.${t}`)) === 0 || all === 0, `CPA without two-step reads nothing in ${t}`);
+  const seen = Number(await one(C, `select count(*) from public.${src}`));
+  ok(seen === all, `CPA reads every row of ${t} through ${src} (${seen} of ${all})`);
+  ok(Number(await one(C1, `select count(*) from public.${src}`)) === 0 || all === 0, `CPA without two-step reads nothing in ${src}`);
 }
+
+// ---------------------------------------------------------------- contact details: never the CPA's
+
+const MAIL = 'member@example.test';
+await db.exec(`
+  insert into public.board_members (name, title, email) values ('Sample Member', 'Director', '${MAIL}');
+  update public.team_requests set requestor_email = '${MAIL}', zelle_contact = '${MAIL}' where id = (select min(id) from public.team_requests);
+  update public.donors set email = '${MAIL}' where id = (select min(id) from public.donors);
+  update public.accounts set owner_email = '${MAIL}' where id = (select min(id) from public.accounts);
+`);
+const CONTACT = await q(`select table_name t, column_name c from information_schema.columns
+                          where table_schema = 'public' and table_name = any($1) and public.cpa_contact_col(column_name)`, [MASKED]);
+ok(CONTACT.length >= 5, 'contact columns found: ' + CONTACT.map((x) => x.t + '.' + x.c).join(', '));
+for (const t of MASKED) {
+  ok(Number(await one(C, `select count(*) from public.${t}`)) === 0, `a direct select of ${t} returns nothing for the CPA`);
+  ok(Number(await one(T, `select count(*) from public.${t}_cpa`)) === 0, `${t}_cpa is the CPA's only (the Treasurer reads the table)`);
+  ok(Number(await one(COACH_C, `select count(*) from public.${t}_cpa`)) === 0, `a team login reads nothing in ${t}_cpa`);
+  const w = await err(C, `delete from public.${t}_cpa`);
+  ok(!!w && REFUSED.test(w.message), `the CPA cannot write through ${t}_cpa: ${w?.message}`);
+}
+for (const { t, c } of CONTACT) {
+  ok(Number(await one(C, `select count(*) from public.${t}_cpa where ${c} is not null`)) === 0, `${t}.${c} is null for the CPA`);
+  ok(Number(await one(C, `select count(*) from public.${t}_cpa where ${c} = '${MAIL}'`)) === 0, `filtering ${t}_cpa on ${c} finds nothing for the CPA`);
+}
+ok(await one(C, `select name from public.board_members_cpa where name = 'Sample Member'`) === 'Sample Member', 'the CPA still reads board member names');
+ok(await one(T, `select email from public.board_members where name = 'Sample Member'`) === MAIL, 'the Treasurer still reads board member emails');
+ok(await one(T, `select requestor_email from public.team_requests where requestor_email = '${MAIL}'`) === MAIL, 'the Treasurer still reads requestor emails');
+// Anywhere: every table and view in public, and every read function with no arguments, as the CPA.
+const rels = await q(`select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+                       where n.nspname = 'public' and c.relkind in ('r','p','v','m') order by 1`);
+let readable = 0;
+for (const { relname } of rels) {
+  const e = await err(C, `select 1 from public.${relname} limit 1`);
+  if (e) continue;
+  readable++;
+  ok(Number(await one(C, `select count(*) from public.${relname} x where x::text ilike '%${MAIL}%'`)) === 0, `no board member email in ${relname} for the CPA`);
+}
+ok(readable >= 25, `the CPA reads ${readable} tables and views, none with a contact email`);
 ok(Number(await one(C, `select count(*) from public.ledger`)) > 50, 'the ledger has rows to read');
 ok(Number(await one(C, `select count(*) from public.money_overrides`)) >= 1, 'the CPA sees Treasurer overrides');
 ok(Number(await one(C, `select count(*) from public.ledger_signed`)) === Number((await q(`select count(*) n from public.ledger`))[0].n), 'ledger_signed reads through');
@@ -86,16 +127,19 @@ ok(typeof (await one(C, `select public.bank_month_difference($1, 0)`, [stmt])) !
 
 // History: the books' log rows, nothing about team logins, the calendar, problem reports, sign-ins, board access or board members' details.
 await db.exec(`insert into auth.sessions (id, user_id, aal) values ('00000000-0000-0000-0000-00000000aaaa', '${TREAS}', 'aal2')`);
-await db.exec(`insert into public.board_members (name, title, email) values ('Sample Member', 'Director', 'member@example.test')`);
 await db.exec(`update public.portal_access set name = 'Sample CPA Two' where user_id = '${CPA}'`);
 const logAll = Number((await q(`select count(*) n from public.change_log where tbl not in ('team_users','team_invites','calendar_events','problem_reports','sessions','seen_tips','portal_access','board_members')`))[0].n);
-ok(Number(await one(C, `select count(*) from public.change_log`)) === logAll && logAll > 0, `History: the CPA reads the books' log (${logAll} rows)`);
+ok(Number(await one(C, `select count(*) from public.change_log_cpa`)) === logAll && logAll > 0, `History: the CPA reads the books' log (${logAll} rows)`);
+ok(Number(await one(C, `select count(*) from public.change_log`)) === 0, 'the CPA reads History only through change_log_cpa');
+ok(Number(await one(T, `select count(*) from public.change_log_cpa`)) === 0, 'change_log_cpa is the CPA only');
 for (const t of ['calendar_events', 'problem_reports', 'team_invites', 'team_users', 'sessions', 'portal_access', 'board_members']) {
   ok(Number((await q(`select count(*) n from public.change_log where tbl = $1`, [t]))[0].n) > 0, `there is ${t} history to hide`);
-  ok(Number(await one(C, `select count(*) from public.change_log where tbl = $1`, [t])) === 0, `History hides ${t} from the CPA`);
+  ok(Number(await one(C, `select count(*) from public.change_log_cpa where tbl = $1`, [t])) === 0, `History hides ${t} from the CPA`);
 }
-ok(Number(await one(C, `select count(*) from public.change_log where coalesce(before::text, '') || coalesce(after::text, '') || coalesce(label, '') || coalesce(summary, '') ilike '%member@example.test%'`)) === 0, 'no board member email anywhere in the CPA History');
-ok(Number(await one(C1, `select count(*) from public.change_log`)) === 0, 'no History without two-step');
+ok(Number((await q(`select count(*) n from public.change_log x where x::text ilike '%${MAIL}%'`))[0].n) > 0, 'the log holds contact emails to hide');
+ok(Number(await one(C, `select count(*) from public.change_log_cpa x where x::text ilike '%${MAIL}%'`)) === 0, 'no board member email anywhere in the CPA History');
+ok(Number(await one(C, `select count(*) from public.change_log_cpa x where x::text ~ '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}'`)) === 0, 'no email address of anyone in the CPA History');
+ok(Number(await one(C1, `select count(*) from public.change_log_cpa`)) === 0, 'no History without two-step');
 
 // Not for the CPA.
 for (const t of ['calendar_events', 'problem_reports', 'team_users', 'team_invites']) {
@@ -151,7 +195,9 @@ const READS = new Set(['my_role', 'is_board', 'is_treasurer', 'is_cpa', 'is_cpa_
   'whoami', 'can_file_direct', 'approvals_needed', 'month_locked', 'fund_balance', 'fund_committed', 'portal_totals', 'bank_month_figures',
   'bank_month_difference', 'spend_warnings', 'request_fund', 'calendar_season_end', 'pad_id', 'require_role',
   // History's pure text helpers (immutable or stable, security invoker): they format, they never read or write a table
-  'log_action', 'log_area', 'log_money', 'log_summary', 'log_team_mask', 'log_team_mask_text']);
+  'log_action', 'log_area', 'log_money', 'log_summary', 'log_team_mask', 'log_team_mask_text',
+  // the CPA's contact masks (immutable, no table)
+  'cpa_contact_col', 'cpa_mask_text', 'cpa_mask_json']);
 const fns = await q(`select p.oid::regprocedure::text sig, p.proname, p.pronargs, p.provolatile,
                             array(select format_type(t, null) from unnest(p.proargtypes) t) args
                        from pg_proc p join pg_namespace n on n.oid = p.pronamespace
@@ -165,6 +211,10 @@ const CALLS = { calendar_archive: `select public.calendar_archive('${event}', 'x
 const missing = [...READS].filter((r) => !fns.some((f) => f.proname === r));
 ok(!missing.length, 'every allowed read exists: ' + missing.join(', '));
 let fnChecks = 0;
+for (const f of fns.filter((x) => READS.has(x.proname) && x.pronargs === 0 && x.proname !== 'require_role')) {
+  const v = await rows(C, `select public.${f.proname}()::text v`);
+  ok(!String(v[0].v || '').toLowerCase().includes(MAIL), `${f.proname}() shows the CPA no board member email`);
+}
 for (const f of fns) {
   if (READS.has(f.proname)) {
     ok(f.provolatile !== 'v' || f.proname === 'require_role', `${f.proname} is an allowed read, so it is not volatile`);

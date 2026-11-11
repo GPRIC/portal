@@ -4,10 +4,10 @@ import { useData } from '@/components/data';
 import { History } from '@/components/history';
 
 export default function HistoryPage() {
-  const { isTreasurer, canExport } = useData();
+  const { isTreasurer, canExport, readOnly } = useData();
   return (
     <Page title="History" help="history" tools={<span className="muted" title="Every add, change, archive, sign-in, approval, payment, import and month lock is written by the database itself, so nothing escapes the log.">Recorded by the database for every board and team action</span>}>
-      <History canRollBack={isTreasurer} canExport={canExport} />
+      <History canRollBack={isTreasurer} canExport={canExport} cpa={readOnly} />
     </Page>
   );
 }
