@@ -3,7 +3,7 @@
 // the page header with About This Page, and the Sample Data flag with its Clear button.
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase/client';
 import { HELP } from '@/lib/help';
@@ -23,6 +23,14 @@ export const NAV: [string, string][] = [
 ];
 
 export function BoardApp({ user, children }: { user: User; children: ReactNode }) {
+  // P39: a person the Treasurer turned off sees nothing (the database refuses every read); say so plainly.
+  const [off, setOff] = useState(false);
+  useEffect(() => {
+    let live = true;
+    supabase().from('my_access_off').select('user_id').limit(1).then(({ data }) => { if (live) setOff(!!data?.length); });
+    return () => { live = false; };
+  }, [user.id]);
+  if (off) return <AccessOff email={user.email} />;
   return (
     <UIProvider>
       <DataProvider user={user}>
@@ -34,6 +42,17 @@ export function BoardApp({ user, children }: { user: User; children: ReactNode }
         </TipsProvider>
       </DataProvider>
     </UIProvider>
+  );
+}
+
+function AccessOff({ email }: { email?: string }) {
+  const router = useRouter();
+  const signOut = async () => { await supabase().auth.signOut(); router.replace('/login'); router.refresh(); };
+  return (
+    <div className="wrap"><div className="panel empty">
+      Your access to the portal is turned off{email ? ' (' + email + ')' : ''}. If you think this is a mistake, ask the Treasurer to turn it back on.
+      <div style={{ marginTop: 10 }}><button className="btn" onClick={signOut}>Sign Out</button></div>
+    </div></div>
   );
 }
 
@@ -72,6 +91,8 @@ function TopBar() {
         {NAV.filter(([href]) => !readOnly || !NOT_FOR_CPA.includes(href)).map(([href, label]) => <Link key={href} href={href} className={path === href ? 'on' : ''}>{label}</Link>)}
         {/* P37: Problem Reports is the Treasurer's only (row security too) */}
         {isTreasurer ? <Link href="/problems" className={'lockd' + (path === '/problems' ? ' on' : '')} title="Only you see this page in the menu"><Icon.lock />Problem Reports</Link> : null}
+        {/* P39: People (who can sign in, and as what) is the Treasurer's only (the database checks too) */}
+        {isTreasurer ? <Link href="/people" className={'lockd' + (path === '/people' ? ' on' : '')} title="Only you see this page in the menu"><Icon.lock />People</Link> : null}
       </nav>
       {/* The CPA files nothing, problem reports included (0012_cpa.sql) */}
       {readOnly ? <span className="chip ro" title="The CPA login reads the books and exports them. It cannot add, change or upload anything.">Read only (CPA)</span>

@@ -4,6 +4,19 @@ export type About = { purpose: string; steps: string[]; who: string };
 const WHO = 'Board members only. Signing in needs your password and your authenticator code.';
 
 export const HELP: Record<string, About> = {
+  people: {
+    purpose: 'Everyone who can sign in to the board side of the portal: board members, the bookkeeper and the CPA. Add people, change what they can do, and turn their access off when they leave. Only you see this page.',
+    steps: [
+      'Add Person sends an invite email. They set a password and an authenticator code, then see what their role allows.',
+      'Treasurer: everything. Board: sees the books, approves and votes. Bookkeeper: pays, reviews and reconciles. CPA: reads and exports only, and never sees contact details.',
+      'Tick Direct Expenses for a board member who may record money already spent by debit card or check. The Treasurer and the bookkeeper can always do this.',
+      'Click a person to change their role, turn access off (with a reason) or back on, or resend an invite they never used. Nothing is deleted; their name stays on everything they did.',
+      'The portal sends only a few emails an hour. If an invite does not go out, the person shows as Invite Not Sent; use Resend Invite later.',
+      'You cannot turn off or change your own seat, so the portal always has a Treasurer. Coaches and team treasurers are invited from Requests, under Teams.',
+      'Every change here is recorded in History, under People.',
+    ],
+    who: 'The Treasurer only. Signing in needs your password and your authenticator code.',
+  },
   dashboard: {
     purpose: 'Your first screen: what needs a decision or a filing now, then the headline money figures.',
     steps: [
