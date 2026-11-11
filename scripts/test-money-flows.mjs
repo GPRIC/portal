@@ -384,6 +384,36 @@ section('3. Direct expense filed by a board member');
     passReason: gerr,
   });
   if (!gerr) await as(T, `select public.ledger_add($1)`, [JSON.stringify({ date: '2026-10-27', dir: 'in', amount: g0 / 100 + 1000, fund_id: 'F-GEN', source: 'Test Deposit' })]);
+
+  // P40 fix 1: the General overspend is blocked, posts nothing, and only the Treasurer's logged override posts it.
+  ok((await bal('F-GEN')) === g0 && (await outRows(gbig.id)).length === 0 && (await req(gbig.id)).status === 'Submitted',
+    'the blocked General review posted nothing and left it Submitted', $(await bal('F-GEN')));
+  await fails(K, `select public.direct_expense_review($1, 'Board said ok')`, [gbig.id], /Only the Treasurer can override/, 'Anna cannot override the General overspend');
+  await fails(T, `select public.direct_expense_review($1, '  ')`, [gbig.id], /not allowed for your role/, 'the Treasurer needs a reason to review it');
+  ok((await q(`select count(*)::int n from public.money_overrides where record_id = $1`, [gbig.id]))[0].n === 0, 'the refused attempts logged no override');
+  await as(T, `select public.direct_expense_review($1, 'Sponsor gift arriving this week')`, [gbig.id]);
+  const gov = await q(`select * from public.money_overrides where record_id = $1`, [gbig.id]);
+  ok(gov.length === 1 && gov[0].action === 'review' && gov[0].fund_id === 'F-GEN' && /overspend/.test(gov[0].rule) && gov[0].reason === 'Sponsor gift arriving this week'
+     && gov[0].by_name === 'Sample Treasurer' && c(gov[0].amount) === c(gbig.amount),
+    'the Treasurer overrides the General overspend: one override logged with rule, reason, who and amount', gov[0]?.rule);
+  await logged('money_overrides', String(gov[0].id), 'Overrode', /^Override · .*overspend/, 'the General override is in History as Overrode under Ledger');
+  ok((await req(gbig.id)).status === 'Reviewed' && (await bal('F-GEN')) === g0 - c(gbig.amount) && (await outRows(gbig.id))[0]?.category === 'Administration',
+    'it posts exactly its total to General as Administration; General is $500 overdrawn', $(await bal('F-GEN')));
+  await as(T, `select public.ledger_add($1)`, [JSON.stringify({ date: '2026-10-27', dir: 'in', amount: 1000, fund_id: 'F-GEN', source: 'Test Deposit' })]);
+  // a General expense within its balance still needs no override, and the Treasurer still cannot review it
+  const gok = await one(O, `select public.direct_expense_file($1)`, [de({ purpose: 'Stamps', charge_fund_id: 'F-GEN', pay_method: 'Debit Card', pay_ref: null, invoices: [{ vendor: 'Sample Post', amount: 9 }] })]);
+  await fails(T, `select public.direct_expense_review($1, 'any reason')`, [gok.id], /The bookkeeper reviews direct expenses/, 'no rule broken: the Treasurer still cannot review a General expense');
+  await as(K, `select public.direct_expense_review($1)`, [gok.id]);
+  ok((await req(gok.id)).status === 'Reviewed' && (await q(`select count(*)::int n from public.money_overrides where record_id = $1`, [gok.id]))[0].n === 0,
+    'Anna reviews a General expense within its balance with no override');
+  // restricted money other than a team fund is never a direct expense's fund, so it has no review path to slip through
+  await as(T, `select public.fund_save($1)`, [JSON.stringify({ name: 'Flow Gift Money', restricted: true, purpose: 'Gift terms' })]);
+  const giftf = (await q(`select id from public.funds where name = 'Flow Gift Money'`))[0].id;
+  await fails(O, `select public.direct_expense_file($1)`, [de({ charge_fund_id: giftf })], /GPRIC General or a team fund/, 'a direct expense cannot be charged to other restricted money');
+  // a team fund's direct expense charged by another team is checked too (restricted to its own team): the team-fund rule stands
+  const tw = await one(O, `select public.direct_expense_file($1)`, [de({ purpose: 'Team overspend probe', invoices: [{ vendor: 'Sample Big', amount: (await bal(TFUND)) / 100 + 1 }] })]);
+  await fails(K, `select public.direct_expense_review($1)`, [tw.id], /Blocked: .*overspend/, 'a team-fund direct expense that overspends is still blocked');
+  await as(B, `select public.request_cancel($1, 'Probe only')`, [tw.id]);
 }
 await books('direct expenses');
 
@@ -433,6 +463,45 @@ section('4a. Refund, and its roll back');
     actual: `close returned $${zl.toFixed(2)} as "Unspent Returned"; the fund ends $${$(zb - z0)} richer than before the request (paid $100, credited $${$(zb - z0 + 10000)})`,
     passReason: `returned ${zl}`,
   });
+  ok(zl === 0 && (await req(z)).status === 'Closed' && c((await req(z)).returned) === 0
+     && (await q(`select count(*)::int n from public.ledger where request_id = $1 and source = 'Unspent Returned'`, [z]))[0].n === 0,
+    'the fully refunded request closes with $0 returned and no Unspent Returned row', `returned ${zl}`);
+  // roll back that close (it booked no money), then close again: still nothing more returned
+  await as(T, `select public.rollback_change($1, 'Closed too early')`, [(await logRow('team_requests', z, 'Closed')).id]);
+  ok((await req(z)).status === 'Receipts Due' && (await bal(TFUND)) === z0, 'rolling back the close: Receipts Due again, the fund unchanged', $(await bal(TFUND)));
+  ok(Number(await one(K, `select public.complete_request_receipts($1, '2026-10-30')`, [z])) === 0 && (await bal(TFUND)) === z0,
+    'closing it again returns nothing; the fund is where it started', $(await bal(TFUND)));
+  // the refund itself cannot be rolled back, so it can never be counted and then taken away
+  const zrf = (await q(`select id from public.request_refunds where request_id = $1`, [z]))[0].id;
+  await fails(T, `select public.rollback_change($1, 'test')`, [(await logRow('request_refunds', zrf, 'Refunded')).id], /fixed once recorded/, 'roll back of the full refund is refused');
+  ok((await bal(TFUND)) === z0, 'the refused refund roll back left the fund where it started', $(await bal(TFUND)));
+}
+await books('full refund then close');
+
+section('4a2. Partial refund, close with receipts, and rolling the close back');
+{
+  const p = await one(C, `select public.submit_team_request($1)`, [pre({ purpose: 'Sensors', amount: 100 })]);
+  await as(T, `select public.approve_request($1)`, [p]);
+  const p0 = await bal(TFUND);
+  await as(K, `select public.mark_request_paid($1, '2026-10-28', 'Check', '5022')`, [p]);
+  await as(B, `select public.request_refund($1, 40, '2026-10-29', 'Returned', 'Two sensors sent back')`, [p]);
+  ok((await bal(TFUND)) === p0 - 6000, 'paid $100, refunded $40: the fund is $60 down', $(await bal(TFUND)));
+  await as(C, `select public.add_team_receipt($1, 'Sample Sensors', 30, '2026-10-29', 's.pdf', $2)`, [p, `team/${TEAM}/s.pdf`]);
+  const pl = Number(await one(K, `select public.complete_request_receipts($1, '2026-10-30')`, [p]));
+  const back = await q(`select * from public.ledger where request_id = $1 and source = 'Unspent Returned'`, [p]);
+  ok(pl === 30 && back.length === 1 && c(back[0].amount) === 3000 && (await req(p)).status === 'Closed' && c((await req(p)).returned) === 3000,
+    'closing with $30 of receipts returns $30 unspent ($100 - $30 spent - $40 refunded)', `returned ${pl}`);
+  ok((await bal(TFUND)) === p0 - 3000, 'the fund nets exactly the $30 spent', $(await bal(TFUND)));
+  await fails(T, `select public.rollback_change($1, 'x')`, [(await logRow('team_requests', p, 'Closed')).id], /reverse that ledger entry first/, 'the close that booked money is not rolled back before its entry');
+  await as(T, `select public.rollback_change($1, 'Receipt was wrong')`, [(await q(`select id from public.change_log where tbl = 'ledger' and record_id = $1 and before is null`, [back[0].id]))[0].id]);
+  ok((await bal(TFUND)) === p0 - 6000, 'reversing the Unspent Returned row: the fund is $60 down again', $(await bal(TFUND)));
+  await as(T, `select public.rollback_change($1, 'Receipt was wrong')`, [(await logRow('team_requests', p, 'Closed')).id]);
+  ok((await req(p)).status === 'Receipts Due' && c((await req(p)).returned) === 0 && (await bal(TFUND)) === p0 - 6000,
+    'rolling back the close: Receipts Due, nothing returned, refund still counted', `${(await req(p)).status} · returned ${(await req(p)).returned}`);
+  const pl2 = Number(await one(K, `select public.complete_request_receipts($1, '2026-10-31')`, [p]));
+  ok(pl2 === 30 && (await bal(TFUND)) === p0 - 3000, 'closing again returns $30 once more; the fund nets $30 out', `returned ${pl2}, ${$(await bal(TFUND))}`);
+  ok((await q(`select count(*)::int n from public.ledger where request_id = $1 and source = 'Unspent Returned' and reverses_id is null and reversed_by_id is null`, [p]))[0].n === 1,
+    'exactly one Unspent Returned row stands for it');
 }
 await books('refund');
 
