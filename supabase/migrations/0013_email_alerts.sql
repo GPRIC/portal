@@ -10,7 +10,9 @@
 --   * The email names the team or fund, the person, the amount and what it is for, with a link to /requests. Never a
 --     Zelle contact, an email address, a check number or any bank or account detail.
 --   * Rows are never deleted (no_delete_guard). Only the Treasurer reads the outbox; clients write nothing, the server
---     writes through email_outbox_claim and email_outbox_done, which only the service role can run.
+--     writes through email_outbox_claim and email_outbox_done, which only the service role can run. Only the cron's
+--     flush counts failed sends against a row (five at most); the open POST flush can never use up a row's attempts.
+--   * The filer shows by name, or as 'A team login' / 'A board member' when the name is missing or is a login email.
 --   * Not in History: the outbox has no log trigger, so it never reaches change_log, change_log_team or change_log_cpa.
 --     The CPA has no read policy on it and carries the 0012 read-only trigger like every other table.
 
@@ -80,7 +82,11 @@ begin
     if v_to is null then return null; end if;
 
     v_amt := '$' || to_char(new.amount, 'FM999,999,990.00');
-    v_who := coalesce(nullif(trim(new.requestor_name), ''), nullif(trim(new.created_by), ''), 'Someone');
+    -- A filer without a name shows as their login email (submit_team_request, my_name()): never put that in an email.
+    v_who := nullif(trim(new.requestor_name), '');
+    if v_who is null or position('@' in v_who) > 0 then
+      v_who := case when new.type = 'Direct Expense' then 'A board member' else 'A team login' end;
+    end if;
     v_for := coalesce(nullif(trim(new.purpose), ''), nullif(trim(new.vendor), ''), 'No description');
 
     if new.type = 'Direct Expense' then
@@ -111,6 +117,9 @@ begin
              || 'It is waiting on the Requests page.';
     end if;
 
+    -- Belt and braces: any email address typed into a purpose or vendor is masked too.
+    v_subject := regexp_replace(v_subject, '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[email hidden]', 'g');
+    v_body := regexp_replace(v_body, '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[email hidden]', 'g');
     insert into public.email_outbox (kind, request_id, subject, body_text, link, to_emails)
     values (v_kind, new.id, v_subject, v_body, '/requests', v_to);
   exception when others then
@@ -126,18 +135,22 @@ create trigger team_requests_email_alert after insert on public.team_requests
 
 -- ---------------------------------------------------------------- send (server only)
 
--- Takes up to p_limit queued rows for sending: counts the attempt and stamps claimed_at, so two flushes running at once
--- never take the same row. A claim older than ten minutes (a send that died midway) is taken again. Five attempts at most.
-create or replace function public.email_outbox_claim(p_limit int default 20)
+-- Takes up to p_limit queued rows for sending and stamps claimed_at, so two flushes running at once never take the same
+-- row. A claim older than ten minutes (a send that died midway) is taken again.
+-- p_counted: the cron's flush (true) takes any queued row and a failed send counts as an attempt (five at most). The open
+-- POST flush (false) takes only rows never tried, and its failures count nothing, so calling it during an outage can never
+-- use up a row's attempts.
+create or replace function public.email_outbox_claim(p_limit int default 20, p_counted boolean default true)
 returns setof public.email_outbox
 language sql
 security definer
 set search_path = ''
 as $$
   update public.email_outbox o
-     set attempts = o.attempts + 1, claimed_at = now()
+     set claimed_at = now()
    where o.id in (select x.id from public.email_outbox x
                    where x.status = 'queued' and x.attempts < 5
+                     and (coalesce(p_counted, false) or x.attempts = 0)
                      and (x.claimed_at is null or x.claimed_at < now() - interval '10 minutes')
                    order by x.id
                    limit least(greatest(coalesce(p_limit, 20), 1), 50)
@@ -145,15 +158,18 @@ as $$
   returning o.*;
 $$;
 
--- Marks a claimed row: sent when p_error is null; otherwise it waits for the next flush, failed after the fifth attempt.
-create or replace function public.email_outbox_done(p_id bigint, p_error text default null)
+-- Marks a claimed row: sent when p_error is null. Otherwise it waits for the next flush; with p_counted the failure counts
+-- as an attempt, and the fifth counted failure marks it failed.
+create or replace function public.email_outbox_done(p_id bigint, p_error text default null, p_counted boolean default true)
 returns void
 language sql
 security definer
 set search_path = ''
 as $$
   update public.email_outbox o
-     set status = case when p_error is null then 'sent' when o.attempts >= 5 then 'failed' else 'queued' end,
+     set attempts = o.attempts + case when p_error is null or coalesce(p_counted, false) then 1 else 0 end,
+         status = case when p_error is null then 'sent'
+                       when coalesce(p_counted, false) and o.attempts + 1 >= 5 then 'failed' else 'queued' end,
          sent_at = case when p_error is null then now() else o.sent_at end,
          error = left(p_error, 500),
          claimed_at = null
@@ -163,7 +179,7 @@ $$;
 do $$
 declare f text;
 begin
-  foreach f in array array['public.email_outbox_claim(int)', 'public.email_outbox_done(bigint,text)'] loop
+  foreach f in array array['public.email_outbox_claim(int,boolean)', 'public.email_outbox_done(bigint,text,boolean)'] loop
     execute format('revoke all on function %s from public, anon, authenticated', f);
     execute format('grant execute on function %s to service_role', f);
   end loop;

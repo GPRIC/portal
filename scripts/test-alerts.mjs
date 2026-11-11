@@ -150,26 +150,62 @@ ok(Number(await one(C, `select count(*) from public.change_log_team where tbl = 
 
 // ---------------------------------------------------------------- the server's send loop (service role)
 
+// The open POST flush (p_counted false): its failures never use up a row's attempts.
+const ids = (await q(`select id from public.email_outbox where status = 'queued' order by id`)).map((r) => r.id);
+for (let i = 0; i < 8; i++) {
+  const got = (await as(SVC, `select * from public.email_outbox_claim(50, false)`)).rows;
+  for (const r of got) await as(SVC, `select public.email_outbox_done($1, 'Outage', false)`, [r.id]);
+}
+const rows = await q(`select * from public.email_outbox where id = any($1) order by id`, [ids]);
+ok(rows.length === 4 && rows.every((r) => r.status === 'queued' && r.attempts === 0 && r.claimed_at === null && r.error === 'Outage'),
+  'eight failed POST flushes during an outage leave every row queued with no attempt counted');
+
 const claimed = (await as(SVC, `select * from public.email_outbox_claim(2)`)).rows;
-ok(claimed.length === 2 && claimed.every((r) => r.attempts === 1 && r.claimed_at), 'the server claims queued rows, counting the attempt');
+ok(claimed.length === 2 && claimed.every((r) => r.claimed_at), 'the cron flush claims queued rows');
 ok((await as(SVC, `select * from public.email_outbox_claim(10)`)).rows.length === 2, 'a second flush never takes rows already claimed');
 await as(SVC, `select public.email_outbox_done($1, null)`, [claimed[0].id]);
 let row = (await q(`select * from public.email_outbox where id = $1`, [claimed[0].id]))[0];
-ok(row.status === 'sent' && row.sent_at && row.error === null, 'a sent row is marked sent');
+ok(row.status === 'sent' && row.sent_at && row.error === null && row.attempts === 1, 'a sent row is marked sent');
 await as(SVC, `select public.email_outbox_done($1, $2)`, [claimed[1].id, 'Provider said no']);
 row = (await q(`select * from public.email_outbox where id = $1`, [claimed[1].id]))[0];
-ok(row.status === 'queued' && row.error === 'Provider said no' && row.claimed_at === null, 'a failed send stays queued for a retry, with its error');
+ok(row.status === 'queued' && row.error === 'Provider said no' && row.claimed_at === null && row.attempts === 1,
+  'a failed cron send stays queued for a retry, counted, with its error');
+// release the other two rows the second cron flush took, as failures the POST would make
+for (const r of (await q(`select id from public.email_outbox where claimed_at is not null`))) await as(SVC, `select public.email_outbox_done($1, 'Outage', false)`, [r.id]);
+const postTakes = (await as(SVC, `select * from public.email_outbox_claim(50, false)`)).rows.map((r) => r.id);
+ok(postTakes.length === 2 && !postTakes.includes(claimed[1].id), 'the POST flush never takes a row the cron has already tried');
+for (const id of postTakes) await as(SVC, `select public.email_outbox_done($1, 'Outage', false)`, [id]);
 for (let i = 0; i < 6; i++) {
-  const c = (await as(SVC, `select * from public.email_outbox_claim(50)`)).rows.filter((r) => r.id === claimed[1].id);
-  if (!c.length) break;
+  const c = (await as(SVC, `select * from public.email_outbox_claim(50)`)).rows;
+  for (const r of c) if (r.id !== claimed[1].id) await as(SVC, `select public.email_outbox_done($1, null)`, [r.id]);
+  if (!c.some((r) => r.id === claimed[1].id)) break;
   await as(SVC, `select public.email_outbox_done($1, 'Still no')`, [claimed[1].id]);
 }
 row = (await q(`select * from public.email_outbox where id = $1`, [claimed[1].id]))[0];
-ok(row.status === 'failed' && row.attempts === 5, `retries stop at five attempts, then failed (${row.status}, ${row.attempts})`);
+ok(row.status === 'failed' && row.attempts === 5, `cron retries stop at five attempts, then failed (${row.status}, ${row.attempts})`);
 await as(SVC, `select public.email_outbox_done($1, null)`, [claimed[1].id]);
 ok((await q(`select status from public.email_outbox where id = $1`, [claimed[1].id]))[0].status === 'failed', 'a failed row is not marked sent later');
 await as(SVC, `select public.email_outbox_done($1, null)`, [claimed[0].id]);
 ok((await q(`select attempts from public.email_outbox where id = $1`, [claimed[0].id]))[0].attempts === 1, 'marking a sent row again changes nothing');
+
+// ---------------------------------------------------------------- a filer with no name: never their login email
+
+const req = async (rid) => (await q(`select * from public.team_requests where id = $1`, [rid]))[0];
+await db.exec(`update public.team_users set name = null where user_id = '${COACH}';
+  update public.portal_access set name = null where user_id = '${BOOKS}';`);
+const r4 = await one(C, `select public.submit_team_request($1)`, [preApproval()]);
+ok((await req(r4)).requestor_name === 'coach@example.org', 'an unnamed team login files under its login email (the case to hide)');
+o = await outbox(r4);
+ok(o.length === 1 && o[0].body_text.startsWith('A team login filed') && !/@/.test(o[0].subject + o[0].body_text),
+  'an unnamed team login shows as "A team login", no address: ' + o[0]?.body_text.split('\n')[0]);
+const d4 = (await one(K, `select public.direct_expense_file($1)`, [direct()])).id;
+ok(/@/.test((await req(d4)).requestor_name || ''), 'an unnamed board login files a direct expense under its login email (the case to hide)');
+o = await outbox(d4);
+ok(o.length === 1 && o[0].body_text.startsWith('A board member filed') && !/@/.test(o[0].subject + o[0].body_text),
+  'an unnamed board login shows as "A board member", no address: ' + o[0]?.body_text.split('\n')[0]);
+const r5 = await one(C, `select public.submit_team_request($1)`, [JSON.stringify({ ...JSON.parse(preApproval()), purpose: 'Order via parts@example.org' })]);
+o = await outbox(r5);
+ok(o.length === 1 && !/@/.test(o[0].subject + o[0].body_text) && /\[email hidden\]/.test(o[0].body_text), 'an address typed into what it is for is masked');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
