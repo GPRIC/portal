@@ -17,12 +17,15 @@ const NUMERIC: Partial<Record<TableName, string[]>> = {
 /** Tables keyed by something other than a text id; rows get a string id so tables and lookups stay uniform. */
 const KEY: Partial<Record<TableName, string>> = { team_users: 'user_id' };
 
-async function fetchAll(table: TableName): Promise<Record<string, unknown>[]> {
+/** Tables with contact columns: the CPA reads them through <table>_cpa, contact columns null (0012_cpa.sql). */
+const CPA_VIEW: TableName[] = ['board_members', 'donors', 'team_requests', 'accounts'];
+
+async function fetchAll(table: TableName, source: string = table): Promise<Record<string, unknown>[]> {
   const sb = supabase();
   const out: Record<string, unknown>[] = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await sb.from(table).select('*').order(KEY[table] || 'id').range(from, from + 999);
-    if (error) throw new Error(table + ': ' + error.message);
+    const { data, error } = await sb.from(source).select('*').order(KEY[table] || 'id').range(from, from + 999);
+    if (error) throw new Error(source + ': ' + error.message);
     out.push(...(data || []));
     if (!data || data.length < 1000) break;
   }
@@ -46,7 +49,7 @@ async function loadDb(): Promise<Db> {
     sb.rpc('portal_totals'),
     sb.rpc('my_role'),
     sb.rpc('can_file_direct'),
-    ...TABLES.map(fetchAll),
+    ...TABLES.map((t) => fetchAll(t)),
   ]);
   if (settings.error) throw new Error('settings: ' + settings.error.message);
   if (totals.error) throw new Error('totals: ' + totals.error.message);
@@ -56,6 +59,10 @@ async function loadDb(): Promise<Db> {
   db.role = (role.data as Role | null) || null;
   db.canFileDirect = canFile.data === true;
   TABLES.forEach((t, i) => { (db as Record<string, unknown>)[t] = rows[i]; });
+  if (db.role === 'cpa') {
+    const masked = await Promise.all(CPA_VIEW.map((t) => fetchAll(t, t + '_cpa')));
+    CPA_VIEW.forEach((t, i) => { (db as Record<string, unknown>)[t] = masked[i]; });
+  }
   return db;
 }
 

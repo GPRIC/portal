@@ -46,8 +46,8 @@ function when(ts: string, year?: boolean) {
   return `${MON[d.getMonth()]} ${d.getDate()}${year ? ', ' + d.getFullYear() : ''}, ${h}:${String(d.getMinutes()).padStart(2, '0')} ${ap}`;
 }
 /** The History query with the filters applied (paging and order added by the caller). */
-function query(team: boolean | undefined, f: F) {
-  let q = supabase().from(team ? 'change_log_team' : 'change_log').select('*', { count: 'exact' });
+function query(src: string, f: F) {
+  let q = supabase().from(src).select('*', { count: 'exact' });
   const s = since(f.range);
   if (s && !f.rec) q = q.gte('at', s);
   if (f.who.length) q = q.in('who', f.who);
@@ -85,7 +85,8 @@ function since(range: string) {
   return d.toISOString();
 }
 
-export function History({ canRollBack, team, canExport }: { canRollBack: boolean; team?: boolean; canExport?: boolean }) {
+export function History({ canRollBack, team, canExport, cpa }: { canRollBack: boolean; team?: boolean; canExport?: boolean; cpa?: boolean }) {
+  const src = team ? 'change_log_team' : cpa ? 'change_log_cpa' : 'change_log';
   const ui = useUI();
   const [f, setF] = useState<F>(fresh);
   const [sort, setSort] = useState<{ k: keyof LogRow; asc: boolean }>({ k: 'at', asc: false });
@@ -102,7 +103,7 @@ export function History({ canRollBack, team, canExport }: { canRollBack: boolean
 
   useEffect(() => {
     let live = true;
-    const q = query(team, f).order(sort.k, { ascending: sort.asc }).order('id', { ascending: sort.asc }).range(page * per, page * per + per - 1);
+    const q = query(src, f).order(sort.k, { ascending: sort.asc }).order('id', { ascending: sort.asc }).range(page * per, page * per + per - 1);
     q.then(({ data, error, count: n }) => {
       if (!live) return;
       setBusy(false);
@@ -110,17 +111,17 @@ export function History({ canRollBack, team, canExport }: { canRollBack: boolean
       setErr(null); setRows((data || []) as LogRow[]); setCount(n || 0);
     });
     return () => { live = false; };
-  }, [f, sort, page, per, tick, team]);
+  }, [f, sort, page, per, tick, src]);
 
   // Who to offer in Filters: everyone in the log for the range shown.
   useEffect(() => {
     let live = true;
-    let q = supabase().from(team ? 'change_log_team' : 'change_log').select('who').order('at', { ascending: false }).limit(2000);
+    let q = supabase().from(src).select('who').order('at', { ascending: false }).limit(2000);
     const s = since(f.range);
     if (s) q = q.gte('at', s);
     q.then(({ data }) => { if (live && data) setPeople([...new Set((data as { who: string }[]).map((r) => r.who))].sort()); });
     return () => { live = false; };
-  }, [f.range, tick, team]);
+  }, [f.range, tick, src]);
 
   const upd = (p: Partial<F>) => { setF((x) => ({ ...x, ...p })); setPage(0); };
   const hidden = f.who.length + f.what.length + f.act.length > 0;
@@ -133,7 +134,7 @@ export function History({ canRollBack, team, canExport }: { canRollBack: boolean
     try {
       const all: LogRow[] = [];
       for (let from = 0; ; from += 1000) {
-        const { data, error } = await query(team, f).order(sort.k, { ascending: sort.asc }).order('id', { ascending: sort.asc }).range(from, from + 999);
+        const { data, error } = await query(src, f).order(sort.k, { ascending: sort.asc }).order('id', { ascending: sort.asc }).range(from, from + 999);
         if (error) throw new Error(error.message);
         all.push(...((data || []) as LogRow[]));
         if (!data || data.length < 1000) break;
