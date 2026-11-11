@@ -237,6 +237,67 @@ await as(T, `select public.people_turn_off('later@example.org', 'Not needed afte
 await db.exec(`insert into auth.users (id, email, invited_at) values ('${id('f5')}', 'later@example.org', now())`);
 ok((await seat(id('f5')))?.role === 'board', 'a cancelled People invite gives nothing special (dashboard default)');
 
+// ---------------------------------------------------------------- every function, as a turned-off seat
+
+// Every function a signed-in role can run, called as a turned-off board member, bookkeeper and CPA, with real
+// arguments (a real fund, request, locked month) and with nulls. Each must refuse or give nothing (null or empty).
+// PURE: text helpers that read no table and only rework their own arguments. SELF: the caller's own sign-in facts.
+const PURE = new Set(['log_action', 'log_area', 'log_money', 'log_summary', 'log_team_mask', 'log_team_mask_text', 'cpa_contact_col', 'cpa_mask_text', 'cpa_mask_json', 'pad_id']);
+const SELF = { my_name: (v, c) => v === c.email, is_cpa_login: (v, c) => v === (c === C) };
+await db.exec(`insert into public.bank_statements (month, locked_at) values ('2026-09-01', now()) on conflict (month) do update set locked_at = now()`);
+const realReq = (await q(`select id from public.team_requests where archived_at is null order by id limit 1`))[0].id;
+const realEvt = (await q(`insert into public.calendar_events (kind, title, date) values ('board', 'Sweep event', '2026-11-20') returning id`))[0].id;
+const fnList = (await q(`select p.proname, p.oid::regprocedure::text sig, array(select format_type(t, null) from unnest(p.proargtypes) t) args
+                           from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                          where n.nspname = 'public' and p.prokind = 'f' and p.prorettype <> 'trigger'::regtype
+                            and has_function_privilege('authenticated', p.oid, 'execute') order by 1`));
+const REAL = { text: (f, i) => (i === 0 && /request/.test(f.proname) ? `'${realReq}'` : i === 0 && /calendar/.test(f.proname) ? `'${realEvt}'` : `'F-GEN'`), numeric: () => '1000000', date: () => `'2026-09-15'`,
+  jsonb: () => `'{}'`, boolean: () => 'false', bigint: () => '1', integer: () => '1', 'text[]': () => `'{}'` };
+// Before: the money helpers answer a board member with access on (so the after checks mean something).
+ok(Number(await one(B, `select public.fund_balance('F-GEN')`)) !== 0 && await one(B, `select public.month_locked('2026-09-15')`) === true
+   && await one(B, `select public.approvals_needed(10)`) != null && (await one(B, `select public.spend_warnings('F-GEN', 1000000, null, null)`)).length > 0,
+   'before: the money helpers answer a board member whose access is on');
+for (const em of ['director@example.org', 'books@example.org', 'cpa@example.org']) await as(T, `select public.people_turn_off($1, 'Sweep')`, [em]);
+let swept = 0;
+for (const [claims, tag] of [[B, 'board'], [K, 'bookkeeper'], [C, 'CPA']]) {
+  for (const f of fnList) {
+    if (PURE.has(f.proname)) continue;
+    for (const mode of ['real', 'null']) {
+      const args = f.args.map((t, i) => (mode === 'null' ? `null::${t}` : `${(REAL[t] || (() => 'null'))(f, i)}::${t}`)).join(', ');
+      const x = await err(claims, `select public.${f.proname}(${args})::text v`);
+      let fine;
+      if (x) fine = REFUSED.test(x.message) || /two-step|not allowed|Only the Treasurer|Board sign-in|Team sign-in/i.test(x.message)
+        || (mode === 'null' && /not found/i.test(x.message)); // a null id finds nothing before any role check; the real id above is refused
+      else {
+        const v = (await as(claims, `select public.${f.proname}(${args})::text v`)).rows[0].v;
+        fine = SELF[f.proname] ? SELF[f.proname](f.proname === 'is_cpa_login' ? v === 'true' : v, claims)
+          : v === null || v === '' || v === '{}' || v === '[]' || v === 'false';
+        if (!fine) x === null && console.log(`  ${tag} ${f.sig} (${mode}) answered: ${String(v).slice(0, 80)}`);
+      }
+      if (process.env.SWEEP_LOG) console.log(`SWEEP ${tag} ${f.sig} ${mode}: ${x ? x.message : "value"}`);
+      ok(fine, `turned-off ${tag} gets nothing from ${f.sig} (${mode} arguments)${x ? ' -> ' + x.message : ''}`);
+      swept++;
+    }
+  }
+}
+ok(swept > 400, `swept ${swept} function calls as turned-off seats`);
+for (const em of ['director@example.org', 'books@example.org', 'cpa@example.org']) await as(T, `select public.people_turn_on($1)`, [em]);
+ok(Number(await one(K, `select public.fund_balance('F-GEN')`)) !== 0 && await one(C, `select public.approvals_needed(10)`) != null,
+   'turned back on: the money helpers answer again');
+// Team logins have no portal seat: the helpers still answer inside the Team Portal.
+const tp = await one(CO, `select public.team_portal()::text`);
+ok(!!tp && tp.length > 20, 'a team login still gets its Team Portal (which uses approvals_needed and the fund helpers)');
+ok(await one(T, `select public.fund_balance('F-GEN')`) != null && await one(T, `select public.my_name()`) === 'Sample Treasurer', 'the Treasurer still gets the helpers');
+ok(!(await q(`select 1 from pg_proc where proname = 'access_off' and has_function_privilege('authenticated', oid, 'execute')`)).length, 'access_off() is internal');
+
+// Two Treasurers at once: both functions lock every active treasurer seat before counting.
+for (const fn of ['people_set_role', 'people_turn_off']) {
+  const src = (await q(`select prosrc from pg_proc where proname = $1`, [fn]))[0].prosrc;
+  const lockAt = src.search(/where a\.role = 'treasurer' and a\.archived_at is null order by a\.user_id for update/);
+  ok(lockAt > 0 && lockAt < src.indexOf('people_target') && src.indexOf('require_role', lockAt) > lockAt,
+    `${fn} locks the treasurer seats before counting, and re-checks the caller after the wait`);
+}
+
 // ---------------------------------------------------------------- roles and guards
 
 await as(T, `select public.people_set_role('director@example.org', 'bookkeeper')`);

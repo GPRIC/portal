@@ -9,8 +9,12 @@
 --     is_cpa, can_read_books, can_file_direct, every board_only and cpa_read policy, the board and CPA storage policies,
 --     History's read policy and portal_totals. The few rules that never asked my_role() (report a problem, its files,
 --     first-visit tips) get restrictive policies below. Turning access back on clears the three columns.
+--     The helpers that never asked my_role() (fund_balance, fund_committed, approvals_needed, month_locked,
+--     request_fund, spend_warnings, calendar_season_end, my_member_id, my_name) give a turned-off seat null (my_name:
+--     only its own sign-in email); team logins and the internal callers are unchanged.
 --   Every People action is a Treasurer-only function, logged to History (area People) by the log trigger every portal
---     table carries. Guards: the Treasurer cannot turn off or change their own seat, and one treasurer always stays on.
+--     table carries. Guards: the Treasurer cannot turn off or change their own seat, and one treasurer always stays on
+--     (every treasurer seat that is on is locked before the count, so two Treasurers at once cannot remove the last).
 
 -- ---------------------------------------------------------------- turned off
 
@@ -251,7 +255,7 @@ begin
 end;
 $$;
 
--- One treasurer always stays on: refuses taking the last one away.
+-- One treasurer always stays on: refuses taking the last one away. Its callers lock the treasurer seats first.
 create or replace function public.people_keep_a_treasurer(p_user uuid)
 returns void
 language plpgsql
@@ -275,14 +279,18 @@ as $$
 declare t record; s public.portal_access; i public.people_invites;
 begin
   perform public.require_role(array['treasurer'], 'Changing a role');
+  -- Two Treasurers acting at once: every treasurer seat that is on is locked first (in one order), then the caller is
+  -- checked again after any wait, so the second one sees the first one's change before counting.
+  perform 1 from public.portal_access a where a.role = 'treasurer' and a.archived_at is null order by a.user_id for update;
+  perform public.require_role(array['treasurer'], 'Changing a role');
   if p_role is null or p_role not in ('treasurer','board','bookkeeper','cpa') then
     raise exception 'Pick a role: Treasurer, Board, Bookkeeper or CPA';
   end if;
   select * into t from public.people_target(p_email);
   s := t.o_seat; i := t.o_invite;
+  if s.user_id is not null and s.role = p_role then return; end if;
   perform public.via('people_role');
   if s.user_id is not null then
-    if s.role = p_role then return; end if;
     if s.user_id = auth.uid() then
       raise exception 'You cannot change your own role. Another Treasurer can do it for you.';
     end if;
@@ -328,6 +336,10 @@ as $$
 declare t record; s public.portal_access; i public.people_invites;
 begin
   perform public.require_role(array['treasurer'], 'Turning off access');
+  -- Two Treasurers acting at once: every treasurer seat that is on is locked first (in one order), then the caller is
+  -- checked again after any wait, so the second one sees the first one's change before counting.
+  perform 1 from public.portal_access a where a.role = 'treasurer' and a.archived_at is null order by a.user_id for update;
+  perform public.require_role(array['treasurer'], 'Turning off access');
   if nullif(trim(coalesce(p_reason, '')), '') is null then raise exception 'Give a reason for turning off their access'; end if;
   select * into t from public.people_target(p_email);
   s := t.o_seat; i := t.o_invite;
@@ -372,6 +384,166 @@ begin
     update public.people_invites set archived_at = null, archived_by = null, archive_reason = null where id = i.id;
   end if;
   perform public.via('');
+end;
+$$;
+
+-- ---------------------------------------------------------------- helpers with no role check
+
+-- True when the signed-in person's portal seat is turned off. Internal: the helpers below call it as their owner.
+create or replace function public.access_off()
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (select 1 from public.portal_access a where a.user_id = auth.uid() and a.archived_at is not null);
+$$;
+revoke all on function public.access_off() from public, anon, authenticated;
+
+-- These answered any signed-in caller without asking my_role(): the money helpers that spend_check, approve, pay,
+-- the totals and the Team Portal call, the calendar's season end, and the "who am I" helpers. A turned-off seat now
+-- gets null from each. Team logins and system jobs have no portal seat, so access_off() is false for them and nothing
+-- changes there; the internal callers run only after their own role check, which already refuses a turned-off seat.
+-- Bodies as before (0003, 0004, 0006, 0008), wrapped in the access_off() check.
+create or replace function public.approvals_needed(p_amount numeric)
+returns int
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select case when public.access_off() then null else
+    (select case when coalesce(p_amount, 0) <= s.approval_threshold then s.approvals_under else s.approvals_over end
+       from public.settings s where s.id = 1) end;
+$$;
+
+create or replace function public.fund_balance(p_fund_id text)
+returns numeric
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select case when public.access_off() then null else
+    (select round(coalesce(sum(case when dir = 'in' then amount else -amount end), 0), 2)
+       from public.ledger where fund_id = p_fund_id) end;
+$$;
+
+create or replace function public.fund_committed(p_fund_id text, p_except_request text default null)
+returns numeric
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select case when public.access_off() then null else
+    (select round(coalesce(sum(r.amount), 0), 2)
+       from public.team_requests r left join public.teams t on t.id = r.team_id
+      where r.archived_at is null and coalesce(r.charge_fund_id, t.fund_id) = p_fund_id
+        and (r.status = 'Approved' or (r.type = 'Direct Expense' and r.status = 'Submitted'))
+        and r.id is distinct from p_except_request) end;
+$$;
+
+create or replace function public.month_locked(p_date date)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select case when public.access_off() then null else
+    exists (select 1 from public.bank_statements s
+             where s.month = date_trunc('month', p_date)::date and s.locked_at is not null) end;
+$$;
+
+create or replace function public.request_fund(p_request_id text)
+returns text
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select case when public.access_off() then null else
+    (select coalesce(r.charge_fund_id, t.fund_id)
+       from public.team_requests r left join public.teams t on t.id = r.team_id
+      where r.id = p_request_id) end;
+$$;
+
+create or replace function public.my_member_id()
+returns text
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select case when public.access_off() then null else
+    (select m.id from public.board_members m
+      where m.email is not null and lower(m.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+      order by m.active desc, m.sort limit 1) end;
+$$;
+
+-- A turned-off seat gets only its own sign-in email back (never null: History's "who" needs a value).
+create or replace function public.my_name()
+returns text
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select case when public.access_off() then coalesce(auth.jwt() ->> 'email', 'system') else coalesce(
+    (select nullif(a.name, '') from public.portal_access a where a.user_id = auth.uid()),
+    (select m.name from public.board_members m where m.id = public.my_member_id()),
+    (select nullif(u.name, '') from public.team_users u where u.user_id = auth.uid()),
+    auth.jwt() ->> 'email', 'system') end;
+$$;
+
+create or replace function public.spend_warnings(p_fund_id text, p_amount numeric, p_team_id text, p_category text, p_except_request text default null)
+returns text[]
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  f public.funds%rowtype;
+  v_avail numeric;
+  w text[] := '{}';
+begin
+  if public.access_off() then return null; end if;
+  select * into f from public.funds where id = p_fund_id;
+  if f.id is null then return w; end if;
+  v_avail := public.fund_balance(f.id) - public.fund_committed(f.id, p_except_request);
+  if p_amount > v_avail then
+    w := w || format('%s has $%s left after other approved requests; paying this would overspend it. Payment will be blocked unless the Treasurer overrides.',
+                     f.name, to_char(v_avail, 'FM999,999,990.00'));
+  end if;
+  if f.restricted and f.team_id is not null and p_team_id is distinct from f.team_id then
+    w := w || format('%s is restricted to its own team.', f.name);
+  elsif f.restricted and f.team_id is null then
+    w := w || format('%s is restricted money: %s.', f.name, coalesce(f.purpose, 'check the gift terms'));
+  end if;
+  return w;
+end;
+$$;
+
+create or replace function public.calendar_season_end(p_date date)
+returns date
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_start date;
+  v_end date;
+begin
+  if public.access_off() then return null; end if;
+  v_start := coalesce((select s.fy_start from public.settings s where s.id = 1), make_date(extract(year from p_date)::int, 7, 1));
+  v_start := make_date(extract(year from p_date)::int, extract(month from v_start)::int, extract(day from v_start)::int);
+  if v_start > p_date then v_start := (v_start - interval '1 year')::date; end if;
+  v_end := (v_start + interval '1 year' - interval '1 day')::date;
+  return v_end;
 end;
 $$;
 
