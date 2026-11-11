@@ -1,6 +1,9 @@
 'use client';
-import { useState } from 'react';
+import { Suspense, useMemo, useState, type ReactNode } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Page } from '@/components/shell';
+import { BoardReceipts, boardReceiptRows } from '@/components/receipts/board-receipts';
+import { receiptSummary } from '@/components/receipts/receipts';
 import { rpc, uploadFile, useData } from '@/components/data';
 import { Area, DateIn, DocOpen, Err, FilePick, Foot, orNull, Select, Txt } from '@/components/forms';
 import { Badge, Check, Kv, Modal, Pills, Seg, Table, useUI, type Col, type Tone } from '@/components/ui';
@@ -17,6 +20,39 @@ function linked(calc: Calc, id: string | null) {
 }
 
 export default function DocumentsPage() {
+  return <Suspense fallback={<div className="loading">Loading…</div>}><Documents /></Suspense>;
+}
+
+/** Two tabs: Documents, and Receipts (every receipt on file and every paid item missing one). ?tab=receipts opens Receipts. */
+function Documents() {
+  const { calc } = useData();
+  const sp = useSearchParams();
+  const router = useRouter();
+  const path = usePathname();
+  const tab = sp.get('tab') === 'receipts' ? 'Receipts' : 'Documents';
+  const go = (t: string) => router.replace(t === 'Receipts' ? path + '?tab=receipts' : path, { scroll: false });
+  const [q, setQ] = useState('');
+  const rcRows = useMemo(() => boardReceiptRows(calc), [calc]);
+  const tabs = (
+    <div className="rc-tabs" role="tablist">
+      {['Documents', 'Receipts'].map((t) => (
+        <button key={t} type="button" role="tab" aria-selected={tab === t} className={'rc-tab' + (tab === t ? ' on' : '')} onClick={() => go(t)}
+          title={t === 'Receipts' ? receiptSummary(rcRows) : "GPRIC's paperwork"}>{t}{t === 'Receipts' && rcRows.some((r) => r.missing) ? <span className="muted"> · {rcRows.filter((r) => r.missing).length} missing</span> : null}</button>
+      ))}
+    </div>
+  );
+  if (tab === 'Receipts') {
+    return (
+      <Page title="Documents" help="documents" actions={<input className="in rq-srch" placeholder="Search vendor, request, person" value={q} onChange={(e) => setQ(e.target.value)} />}>
+        {tabs}
+        <BoardReceipts q={q} />
+      </Page>
+    );
+  }
+  return <DocumentsTab tabs={tabs} />;
+}
+
+function DocumentsTab({ tabs }: { tabs: ReactNode }) {
   const { db, calc } = useData();
   const ui = useUI();
   const [filt, setFilt] = useState('All');
@@ -33,6 +69,7 @@ export default function DocumentsPage() {
   ];
   return (
     <Page title="Documents" help="documents" actions={<button className="btn pri" onClick={() => ui.open(<DocForm />)}>Add Document</button>}>
+      {tabs}
       <div className="panel">
         <Pills items={items} active={filt} onPick={setFilt} />
         <Table cols={cols} rows={all.filter((d) => filt === 'All' || (filt === 'Public' ? d.public : d.type === filt))} sort="date" dir={-1} onRow={(d) => ui.open(<DocForm id={d.id} />)} />

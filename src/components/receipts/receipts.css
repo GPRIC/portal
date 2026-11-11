@@ -1,0 +1,31 @@
+/* Receipts (mockup #100). Filter row, pager and empty state reuse the Requests page's rq- classes; these are the extras. */
+.rc-tabs { display: flex; gap: 18px; border-bottom: 1px solid var(--bs); margin: -4px 0 14px; }
+.rc-tab { background: none; border: none; border-bottom: 2px solid transparent; padding: 6px 2px 9px; color: var(--t2); cursor: pointer; font: inherit; margin-bottom: -1px; }
+.rc-tab:hover { color: var(--t); }
+.rc-tab.on { color: var(--t); border-bottom-color: var(--g); font-weight: 600; }
+
+.rc-pop-list { display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow-y: auto; }
+.rc-pop-list.dim { opacity: .45; pointer-events: none; }
+.rc-pop-list label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+
+/* the receipt modal: preview on the left, the request on the right */
+.modal.wide:has(.rc-split) { width: min(820px, 100%); }
+.rc-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 16px; align-items: start; }
+.rc-pv { border: 1px solid var(--bs); border-radius: var(--r); background: var(--inset); padding: 10px; display: flex; flex-direction: column; gap: 10px; min-height: 340px; }
+.rc-pv-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rc-pv-body { flex: 1; display: flex; align-items: center; justify-content: center; border-radius: 6px; overflow: hidden; min-height: 280px; background: var(--card); }
+.rc-pv-body img { max-width: 100%; max-height: 420px; object-fit: contain; display: block; }
+.rc-pv-body iframe { width: 100%; height: 420px; border: 0; background: #fff; }
+.rc-drop { flex: 1; border: 1.5px dashed var(--bst); border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 24px 12px; text-align: center; color: var(--t3); min-height: 240px; }
+.rc-drop.over { border-color: var(--g); background: rgba(var(--g-rgb), .06); }
+.rc-drop b { color: var(--t); font-weight: 600; }
+.rc-fields { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 6px 8px; align-items: center; }
+.rc-fields .k { color: var(--t3); font-size: 12px; }
+.rc-kv { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px 10px; align-items: center; }
+.rc-kv .k { color: var(--t3); }
+.rc-kv .full { grid-column: 1 / -1; }
+.rc-inv tr.cur td { background: var(--inset); }
+.rc-inv tr.pick { cursor: pointer; }
+.rc-inv tr.pick:hover td { background: var(--hover); }
+.rc-rem { font-size: 12px; color: var(--t3); }
+@media (max-width: 720px) { .rc-split { grid-template-columns: 1fr; } .rc-pv { min-height: 0; } }

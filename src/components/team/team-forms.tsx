@@ -56,6 +56,8 @@ export function NewRequest() {
 
 export type Prefill = Partial<Pick<TeamReq, 'purpose' | 'category' | 'vendor' | 'pay_to' | 'needed_by' | 'purchase_date'>> & { amount?: number };
 
+type RcIn = { vendor: string; amount: string; date: string; file: File | null };
+
 export function RequestForm({ type: type0, pre }: { type: ReqType; pre?: Prefill }) {
   const ui = useUI();
   const { p, today, reload } = useTeam();
@@ -65,7 +67,10 @@ export function RequestForm({ type: type0, pre }: { type: ReqType; pre?: Prefill
     needed_by: pre?.needed_by || '', pay_to: pre?.pay_to || PAY_TO[0], purchase_date: pre?.purchase_date || today,
     vendor: pre?.vendor || '', zelle: p.me.zelle_contact || '', ledger: '',
   }));
-  const [file, setFile] = useState<File | null>(null);
+  // A reimbursement lists each receipt; its total is their sum (the board sees the same receipts and cannot retype it).
+  const [rows, setRows] = useState<RcIn[]>(() => [{ vendor: pre?.vendor || '', amount: pre?.amount ? String(pre.amount) : '', date: pre?.purchase_date || today, file: null }]);
+  const setRow = (i: number, x: Partial<RcIn>) => setRows((o) => o.map((r, k) => (k === i ? { ...r, ...x } : r)));
+  const total = Math.round(rows.reduce((t, r) => t + (num(r.amount) > 0 ? num(r.amount) : 0), 0) * 100) / 100;
   const [cert, setCert] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -75,27 +80,36 @@ export function RequestForm({ type: type0, pre }: { type: ReqType; pre?: Prefill
 
   const submit = async () => {
     setErr(null);
-    const a = num(f.amount);
-    if (!(a > 0)) { setErr('Enter the amount.'); return; }
-    if (pre1 && !f.purpose.trim()) { setErr('Say what the money is for.'); return; }
-    if (!pre1) {
-      if (!f.vendor.trim()) { setErr('Enter the vendor.'); return; }
-      if (!file) { setErr('Attach the itemized receipt.'); return; }
+    const a = pre1 ? num(f.amount) : total;
+    if (pre1) {
+      if (!(a > 0)) { setErr('Enter the amount.'); return; }
+      if (!f.purpose.trim()) { setErr('Say what the money is for.'); return; }
+    } else {
+      for (let i = 0; i < rows.length; i++) {
+        const n = rows.length > 1 ? ' on receipt ' + (i + 1) : '';
+        if (!rows[i].vendor.trim()) { setErr('Enter the vendor' + n + '.'); return; }
+        if (!(num(rows[i].amount) > 0)) { setErr('Enter the amount' + n + '.'); return; }
+        if (!rows[i].file) { setErr('Attach the itemized receipt' + n + '.'); return; }
+      }
       if (!f.zelle.trim()) { setErr('Add the Zelle contact to pay you.'); return; }
     }
     if (!cert) { setErr('Tick the certification to submit.'); return; }
     setBusy(true);
-    let path: string | null = null, name: string | null = null;
-    if (!pre1 && file) {
-      const up = await uploadFile('team/' + p.team.id, file);
-      if ('error' in up) { setBusy(false); setErr('Upload failed: ' + up.error); return; }
-      path = up.path; name = up.name;
+    const receipts: { vendor: string; amount: number; date: string; file_name: string; file_path: string }[] = [];
+    if (!pre1) {
+      for (const r of rows) {
+        const up = await uploadFile('team/' + p.team.id, r.file as File);
+        if ('error' in up) { setBusy(false); setErr('Upload failed: ' + up.error); return; }
+        receipts.push({ vendor: r.vendor.trim(), amount: num(r.amount), date: r.date || today, file_name: up.name, file_path: up.path });
+      }
     }
+    const vendors = [...new Set(receipts.map((r) => r.vendor))].join(', ');
+    const first = receipts.map((r) => r.date).sort()[0] || today;
     const body = pre1
       ? { type, purpose: f.purpose.trim(), category: f.category, amount: a, needed_by: f.needed_by || null, pay_to: f.pay_to,
           zelle_contact: f.pay_to === 'Me by Zelle' ? f.zelle.trim() || null : null, certified: true }
-      : { type, purpose: f.vendor.trim(), vendor: f.vendor.trim(), category: f.category, amount: a, purchase_date: f.purchase_date || today,
-          zelle_contact: f.zelle.trim(), team_ledger_ref: f.ledger.trim() || null, receipt_path: path, receipt_name: name, certified: true };
+      : { type, purpose: vendors, category: f.category, amount: a, purchase_date: first,
+          zelle_contact: f.zelle.trim(), team_ledger_ref: f.ledger.trim() || null, receipts, certified: true };
     const { data, error } = await supabase().rpc('submit_team_request', { p: body });
     setBusy(false);
     if (error) { setErr(friendly(error.message)); return; }
@@ -139,12 +153,25 @@ export function RequestForm({ type: type0, pre }: { type: ReqType; pre?: Prefill
         </>
       ) : (
         <>
-          <Kv k="Purchase Date"><span style={{ display: 'inline-block', width: 170 }}><DateIn value={f.purchase_date} onChange={(v) => set({ purchase_date: v })} /></span></Kv>
-          <Kv k="Vendor"><Txt value={f.vendor} onChange={(v) => set({ vendor: v })} placeholder="e.g. AndyMark, REV Robotics, Home Depot" /></Kv>
           {category}
-          {amountField}
-          <KvI k="Receipt" tip={RECEIPT_RULE}>
-            <FilePick file={file} onFile={setFile} accept="image/*,application/pdf" />
+          {rows.map((r, i) => (
+            <div key={i} className="full" style={{ border: '1px solid var(--bs)', borderRadius: 'var(--r)', padding: '8px 10px', display: 'grid', gap: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="muted">Receipt {rows.length > 1 ? i + 1 : ''} <span className="info" title={RECEIPT_RULE}>?</span></span>
+                <span style={{ flex: 1 }} />
+                {rows.length > 1 ? <button className="btn sm" onClick={() => setRows((o) => o.filter((_, k) => k !== i))}>Remove</button> : null}
+              </div>
+              <Txt value={r.vendor} onChange={(v) => setRow(i, { vendor: v })} placeholder="Vendor, e.g. AndyMark, REV Robotics, Home Depot" />
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ width: 150 }}><Amount value={r.amount} onChange={(v) => setRow(i, { amount: v })} /></span>
+                <span style={{ width: 170 }} title="Purchase date on the receipt"><DateIn value={r.date} onChange={(v) => setRow(i, { date: v })} /></span>
+              </div>
+              <FilePick file={r.file} onFile={(x) => setRow(i, { file: x })} accept="image/*,application/pdf" />
+            </div>
+          ))}
+          <div className="full"><button className="btn sm" onClick={() => setRows((o) => [...o, { vendor: '', amount: '', date: today, file: null }])}>+ Add Receipt</button></div>
+          <KvI k="Total" tip={approvalRule(p) + ' The total is the sum of your receipts.'}>
+            <b>{money(total, true)}</b>{rows.length > 1 ? <span className="muted"> · {rows.length} receipts</span> : null}
           </KvI>
           <KvI k="Zelle Contact" tip="From your profile. Change it under Profile to keep it for next time.">
             <Txt value={f.zelle} onChange={(v) => set({ zelle: v })} placeholder="Phone or email" />

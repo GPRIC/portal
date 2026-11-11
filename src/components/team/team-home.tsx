@@ -3,12 +3,12 @@
 import { useState, type ReactNode } from 'react';
 import { Page } from '@/components/shell';
 import { uploadFile } from '@/components/data';
-import { Amount, DateIn, Err, FilePick, num, orNull, Txt } from '@/components/forms';
+import { Amount, DateIn, Err, FileLink, FilePick, num, orNull, Txt } from '@/components/forms';
 import { Badge, Card, Kv, Modal, St, Steps, Table, useUI, type Col } from '@/components/ui';
 import { Tip } from '@/components/tips';
 import { supabase } from '@/lib/supabase/client';
 import { addDays, daysBetween, money, sd, sum } from '@/lib/format';
-import { friendly, useTeam, type Gift, type Portal, type TeamReq } from './team-data';
+import { friendly, useTeam, type Gift, type Portal, type TeamReceipt, type TeamReq } from './team-data';
 import { approvalRule, NewRequest, RECEIPT_RULE, RequestForm, TypeBadge } from './team-forms';
 
 const ICON: Record<'eye' | 'rcpt' | 'redo', ReactNode> = {
@@ -167,7 +167,8 @@ function stepsFor(p: Portal, r: TeamReq, today: string): Parameters<typeof Steps
   return list;
 }
 
-function RequestView({ id }: { id: string }) {
+/** One request: its steps, its receipts (added while open), and its cancel, refund and reminder, read only. */
+export function RequestView({ id }: { id: string }) {
   const ui = useUI();
   const { p, today, reload } = useTeam();
   const r = p.requests.find((x) => x.id === id);
@@ -177,11 +178,23 @@ function RequestView({ id }: { id: string }) {
   const [busy, setBusy] = useState(false);
   if (!r) return <Modal title="Request"><div className="full empty">This request is no longer here.</div></Modal>;
   const pre = r.type === 'Pre-Approval';
-  const collecting = r.status === 'Receipts Due';
+  // A reimbursement still waiting with no approval takes more receipts; its total is their sum.
+  const reimbOpen = !pre && r.status === 'Submitted' && r.approvals === 0 && r.receipt_list.length > 0;
+  const collecting = r.status === 'Receipts Due' || reimbOpen;
+  const removable = r.status === 'Receipts Due' || (reimbOpen && r.receipt_list.length > 1);
+  const mine = (path: string | null) => !!path && path.startsWith('team/' + p.team.id + '/');
 
+  const removeReceipt = async (x: TeamReceipt) => {
+    const why = await ui.ask({ title: 'Remove Receipt', body: <>Take the {money(x.amount, true)} receipt{x.vendor ? ' from ' + x.vendor : ''} off {r.id}? The file is kept.</>, ok: 'Remove', danger: true });
+    if (!why) return;
+    const { error } = await supabase().rpc('team_receipt_remove', { p_id: x.id, p_reason: why });
+    if (error) { ui.toast(friendly(error.message), true); return; }
+    ui.toast('Receipt removed');
+    await reload();
+  };
   const saveReceipt = async () => {
     const a = num(rc.amount);
-    if (!(a >= 0) || rc.amount.trim() === '') { setErr('Enter the receipt amount.'); return; }
+    if (!(a >= 0) || rc.amount.trim() === '' || (!pre && !(a > 0))) { setErr('Enter the receipt amount.'); return; }
     if (!file) { setErr('Attach the itemized receipt.'); return; }
     setBusy(true); setErr(null);
     const up = await uploadFile('team/' + p.team.id, file);
@@ -192,7 +205,7 @@ function RequestView({ id }: { id: string }) {
     setBusy(false);
     if (error) { setErr(friendly(error.message)); return; }
     setRc({ vendor: '', amount: '', date: today }); setFile(null);
-    ui.toast('Receipt sent to the board');
+    ui.toast(reimbOpen ? 'Receipt added · the total follows your receipts' : 'Receipt sent to the board');
     await reload();
   };
   const resubmit = () => { ui.close(); ui.open(<RequestForm type={r.type} pre={prefillFrom(r)} />); };
@@ -206,15 +219,34 @@ function RequestView({ id }: { id: string }) {
       <Kv k="Type"><TypeBadge type={r.type} /></Kv>
       <Kv k={pre ? 'Purpose' : 'Vendor'}>{what(r)}</Kv>
       <Kv k="Category">{r.category}</Kv>
-      <Kv k="Amount">{money(r.amount, true)}</Kv>
+      <Kv k="Amount">{money(r.amount, true)}{!pre && r.receipt_list.length ? <span className="muted"> · the sum of {r.receipt_list.length === 1 ? 'its receipt' : 'its ' + r.receipt_list.length + ' receipts'}</span> : null}</Kv>
       <Kv k={pre ? 'Submitted' : 'Purchase Date'}>{sd(when(r))}</Kv>
       {pre && r.needed_by ? <Kv k="Needed By">{sd(r.needed_by)}</Kv> : null}
       {pre ? <Kv k="Pay To">{r.pay_to}</Kv> : null}
-      {r.receipt_name ? <Kv k="Receipt">{r.receipt_name}</Kv> : null}
+      {r.receipt_name && !r.receipt_list.length ? <Kv k="Receipt">{mine(r.receipt_path) ? <FileLink path={r.receipt_path} name={r.receipt_name} /> : r.receipt_name}</Kv> : null}
       {r.requestor_name ? <Kv k="Requested By">{r.requestor_name}</Kv> : null}
       {pre && (collecting || r.status === 'Closed') ? <Kv k="Receipts">{r.receipts + ' added · ' + money(r.receipts_total, true) + ' of ' + money(r.amount, true)}</Kv> : null}
       <Kv k="Status"><StatusCell r={r} /></Kv>
+      {r.status === 'Cancelled' ? <Kv k="Cancelled">{(r.cancel_reason || 'Cancelled by the board') + (r.cancelled_at ? ' · ' + sd(r.cancelled_at.slice(0, 10)) : '')}{r.replaced_by_id ? <span className="muted"> · replaced by {r.replaced_by_id}</span> : null}</Kv> : null}
+      {r.replaces_id ? <Kv k="Replaces">{r.replaces_id}</Kv> : null}
+      {r.refund ? <Kv k="Refund"><span title="Money that came back to your fund on this request. Recorded by the board.">{money(r.refund.amount, true)} · {r.refund.reason} · {sd(r.refund.date)}</span></Kv> : null}
+      {r.missing && r.reminder ? <div className="full warn"><b>Receipt requested.</b> The board asked for this receipt on {sd(r.reminder.at.slice(0, 10))}{r.reminder.note ? ': ' + r.reminder.note : '.'}</div> : null}
       <Steps list={stepsFor(p, r, today)} />
+      {r.receipt_list.length ? (
+        <div className="full scroll">
+          <table className="subtable">
+            <thead><tr><th>Vendor</th><th>Date</th><th>File</th><th className="num">Amount</th>{removable ? <th /> : null}</tr></thead>
+            <tbody>{r.receipt_list.map((x) => (
+              <tr key={x.id}>
+                <td>{x.vendor || '—'}</td><td>{sd(x.date)}</td>
+                <td>{x.file_path ? (mine(x.file_path) ? <FileLink path={x.file_path} name={x.file_name} /> : <span className="muted" title="Filed by the board">{x.file_name || 'On file'}</span>) : <Badge tone="amb">Missing</Badge>}</td>
+                <td className="num">{money(x.amount, true)}</td>
+                {removable ? <td><button className="btn sm" onClick={() => removeReceipt(x)}>Remove</button></td> : null}
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      ) : null}
       {collecting ? (
         <>
           <div className="full muted" style={{ marginTop: 6 }}>Add Receipt <span className="info" title={RECEIPT_RULE}>?</span></div>

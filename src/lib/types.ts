@@ -80,6 +80,8 @@ export type TeamRequest = Base & {
 export type Refund = Base & {
   request_id: string; amount: number; date: string; reason: 'Returned' | 'Cancelled'; note: string | null; ledger_id: string | null; by_name: string | null;
 };
+/** A missing-receipt reminder (0011): flagged in the portal only; nothing is emailed. */
+export type Reminder = Base & { request_id: string; note: string | null; by_name: string | null };
 /** One board member's approval of a request (written only by approve_request). */
 export type Approval = { id: string; request_id: string; user_id: string; member_id: string | null; approver_name: string; approved_at: string; sample: boolean };
 export type Ledger = Base & {
@@ -130,9 +132,9 @@ export type Db = {
   meetings: Meeting[]; meeting_votes: Vote[]; team_requests: TeamRequest[]; ledger: Ledger[]; receipts: Receipt[];
   accounts: Account[]; documents: Doc[];
   request_approvals: Approval[]; team_users: TeamUser[]; team_invites: TeamInvite[]; bank_statements: BankStatement[]; bank_lines: BankLine[];
-  zeffy_sync_log: ZeffySync[]; request_refunds: Refund[];
+  zeffy_sync_log: ZeffySync[]; request_refunds: Refund[]; receipt_reminders: Reminder[];
 };
 export type TableName = Exclude<keyof Db, 'settings' | 'canFileDirect'>;
 export const TABLES: TableName[] = ['teams', 'funds', 'board_members', 'grants', 'donors', 'donations', 'meetings', 'meeting_votes',
   'team_requests', 'ledger', 'receipts', 'accounts', 'documents', 'request_approvals', 'team_users', 'team_invites', 'bank_statements',
-  'bank_lines', 'zeffy_sync_log', 'request_refunds'];
+  'bank_lines', 'zeffy_sync_log', 'request_refunds', 'receipt_reminders'];

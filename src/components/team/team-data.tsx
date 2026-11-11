@@ -10,7 +10,22 @@ export type TeamReq = {
   status: string; paid_date: string | null; pay_method: string | null; decline_reason: string | null;
   requestor_name: string | null; receipt_name: string | null;
   approvals: number; needed: number; receipts: number; receipts_total: number;
+} & Extra;
+/** One receipt on a request (0011). A file outside team/<team>/ was uploaded by the board and opens only for the board. */
+export type TeamReceipt = { id: string; request_id: string; vendor: string | null; amount: number; date: string | null; file_name: string | null; file_path: string | null; uploaded_by: string | null; created_at: string | null };
+/** What a team sees of a request beyond its status (0011): its receipts, cancel, refund and the last reminder, read only. */
+type Extra = {
+  receipt_list: TeamReceipt[]; receipt_path: string | null;
+  cancel_reason: string | null; cancelled_at: string | null; replaced_by_id: string | null; replaces_id: string | null;
+  refund: { amount: number; date: string; reason: string } | null;
+  reminder: { at: string; by: string | null; note: string | null } | null;
+  missing: boolean;
 };
+/** A purchase the board paid directly from the team's own fund (its invoices are the team's receipts too). */
+export type TeamDirect = {
+  id: string; type: 'Direct Expense'; purpose: string; category: string | null; amount: number; vendor: string | null; submitted: string | null;
+  status: string; paid_date: string | null; pay_method: string | null; requestor_name: string | null;
+} & Extra;
 export type Gift = { id: string; date: string; amount: number; donor: string; in_transit: boolean };
 export type Portal = {
   team: { id: string; name: string; short: string; program: string | null; pay_mode: string | null; school: string | null };
@@ -21,12 +36,28 @@ export type Portal = {
   season_start: string | null;
   raised: number;
   requests: TeamReq[];
+  direct: TeamDirect[];
   gifts: Gift[];
 };
 
 type Raw = Record<string, unknown>;
 const n = (v: unknown) => Number(v) || 0;
 const s = (v: unknown) => (v == null || v === '' ? null : String(v));
+
+function extra(x: Raw, rid: string): Extra {
+  const rf = x.refund as Raw | null, rm = x.reminder as Raw | null;
+  return {
+    receipt_list: ((x.receipt_list || []) as Raw[]).map((c) => ({
+      id: String(c.id), request_id: rid, vendor: s(c.vendor), amount: n(c.amount), date: s(c.date), file_name: s(c.file_name),
+      file_path: s(c.file_path), uploaded_by: s(c.uploaded_by), created_at: s(c.created_at),
+    })),
+    receipt_path: s(x.receipt_path),
+    cancel_reason: s(x.cancel_reason), cancelled_at: s(x.cancelled_at), replaced_by_id: s(x.replaced_by_id), replaces_id: s(x.replaces_id),
+    refund: rf ? { amount: n(rf.amount), date: String(rf.date ?? ''), reason: String(rf.reason ?? '') } : null,
+    reminder: rm ? { at: String(rm.at ?? ''), by: s(rm.by), note: s(rm.note) } : null,
+    missing: x.missing === true,
+  };
+}
 
 function normalize(raw: Raw): Portal {
   const t = (raw.team || {}) as Raw, me = (raw.me || {}) as Raw, r = (raw.rules || {}) as Raw, m = (raw.money || {}) as Raw;
@@ -44,6 +75,12 @@ function normalize(raw: Raw): Portal {
       submitted: s(x.submitted), status: String(x.status ?? ''), paid_date: s(x.paid_date), pay_method: s(x.pay_method),
       decline_reason: s(x.decline_reason), requestor_name: s(x.requestor_name), receipt_name: s(x.receipt_name),
       approvals: n(x.approvals), needed: n(x.needed) || 1, receipts: n(x.receipts), receipts_total: n(x.receipts_total),
+      ...extra(x, String(x.id)),
+    })),
+    direct: ((raw.direct || []) as Raw[]).map((x) => ({
+      id: String(x.id), type: 'Direct Expense' as const, purpose: String(x.purpose ?? ''), category: s(x.category), amount: n(x.amount),
+      vendor: s(x.vendor), submitted: s(x.submitted), status: String(x.status ?? ''), paid_date: s(x.paid_date), pay_method: s(x.pay_method),
+      requestor_name: s(x.requestor_name), ...extra(x, String(x.id)),
     })),
     gifts: ((raw.gifts || []) as Raw[]).map((x) => ({ id: String(x.id), date: String(x.date ?? ''), amount: n(x.amount), donor: String(x.donor ?? ''), in_transit: x.in_transit === true })),
   };

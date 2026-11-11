@@ -95,6 +95,13 @@ export default function RequestsPage() {
   const [per, setPer] = useState(25);
   const [sort, setSort] = useState<{ k: SortK; asc: boolean }>({ k: 'date', asc: false });
 
+  // /requests?id=R-1001 opens that request (the Receipts tab links here).
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('id');
+    if (!id) return;
+    history.replaceState(null, '', window.location.pathname);
+    ui.open(<RequestView id={id} />);
+  }, [ui]);
   const all = db.team_requests.filter((r) => r.status !== 'Draft');
   const ql = q.trim().toLowerCase();
   const hay = (r: TeamRequest) => [r.id, r.purpose, r.vendor, r.category, calc.chargeTo(r), requestor(r), r.status, r.type, ...calc.receiptsFor(r.id).map((x) => x.vendor)].filter(Boolean).join(' ').toLowerCase();
@@ -245,6 +252,10 @@ function RequestView({ id }: { id: string }) {
   const vendors = [...new Set(inv.map((x) => x.vendor).filter(Boolean))].join(', ') || r.vendor || '';
   const paid = !!r.paid_date && r.status !== 'Cancelled';
   const before = UNPAID.includes(r.status) && !pay;
+  // A reimbursement still waiting with no approval takes more receipts; its total is their sum (0011).
+  const reimbOpen = isR(r) && ['Draft', 'Submitted'].includes(r.status) && !calc.approvalsFor(r.id).length && receipts.length > 0;
+  const adding = openReceipts || reimbOpen;
+  const removable = (r.type === 'Pre-Approval' && r.status !== 'Closed' && receipts.length > 0) || (reimbOpen && receipts.length > 1);
 
   const addReceipt = async () => {
     const a = num(rc.amount);
@@ -252,7 +263,7 @@ function RequestView({ id }: { id: string }) {
     setBusy(true); setErr(null);
     let path: string | null = null, name: string | null = null;
     if (file) {
-      const up = await uploadFile('receipts/' + r.id, file);
+      const up = await uploadFile(r.team_id ? 'team/' + r.team_id + '/receipts' : 'receipts/' + r.id, file);
       if ('error' in up) { setBusy(false); setErr('Upload failed: ' + up.error); return; }
       path = up.path; name = up.name;
     }
@@ -364,20 +375,20 @@ function RequestView({ id }: { id: string }) {
       {vendors ? <Kv k="Vendors">{vendors}</Kv> : null}
       {isR(r) && r.zelle_contact ? <Kv k="Zelle">{r.zelle_contact}</Kv> : null}
       {r.type === 'Pre-Approval' ? <Kv k="Pay To">{(r.pay_to || '') + (r.needed_by ? ' · needed by ' + sd(r.needed_by) : '')}</Kv> : null}
-      {inv.length || openReceipts ? (
+      {inv.length || adding ? (
         <div className="full scroll">
           <table className="rq-inv">
-            <thead><tr><th>Vendor</th><th>Invoice Date</th><th>File</th><th className="num">Amount</th>{openReceipts || (r.type === 'Pre-Approval' && r.status !== 'Closed' && receipts.length) ? <th /> : null}</tr></thead>
+            <thead><tr><th>Vendor</th><th>Invoice Date</th><th>File</th><th className="num">Amount</th>{adding || removable ? <th /> : null}</tr></thead>
             <tbody>
               {inv.map((x) => (
                 <tr key={x.id}>
                   <td>{x.vendor || '—'}</td><td>{x.date ? sd(x.date) : '—'}</td>
                   <td>{x.file_path ? <FileLink path={x.file_path} name={x.file_name} /> : <span className="muted">{x.file_name || 'No file'}</span>}</td>
                   <td className="num">{money(x.amount, true)}</td>
-                  {r.type === 'Pre-Approval' && r.status !== 'Closed' && receipts.length ? <td><button className="btn sm" onClick={() => delReceipt(x.id)}>Remove</button></td> : openReceipts ? <td /> : null}
+                  {removable ? <td><button className="btn sm" onClick={() => delReceipt(x.id)}>Remove</button></td> : adding ? <td /> : null}
                 </tr>
               ))}
-              {openReceipts ? (
+              {adding ? (
                 <tr>
                   <td><Txt value={rc.vendor} onChange={(v) => setRc({ ...rc, vendor: v })} placeholder="Vendor and items" /></td>
                   <td><DateIn value={rc.date} onChange={(v) => setRc({ ...rc, date: v })} /></td>
@@ -387,7 +398,7 @@ function RequestView({ id }: { id: string }) {
                 </tr>
               ) : null}
             </tbody>
-            <tfoot><tr><td colSpan={3}>Total · {inv.length} {inv.length === 1 ? 'invoice' : 'invoices'}</td><td className="num">{money(sum(inv, (x) => x.amount), true)}</td>{openReceipts || (r.type === 'Pre-Approval' && r.status !== 'Closed' && receipts.length) ? <td /> : null}</tr></tfoot>
+            <tfoot><tr><td colSpan={3}>Total · {inv.length} {inv.length === 1 ? 'invoice' : 'invoices'}</td><td className="num">{money(sum(inv, (x) => x.amount), true)}</td>{adding || removable ? <td /> : null}</tr></tfoot>
           </table>
         </div>
       ) : null}
@@ -685,6 +696,9 @@ function RequestForm({ id }: { id?: string }) {
   const t = calc.team(f.team_id);
   const amt = num(f.amount);
   const R = f.type === 'Reimbursement';
+  // A reimbursement with receipts listed: its total is their sum (0011), changed by adding or removing a receipt.
+  const rcs = old ? calc.receiptsFor(old.id) : [];
+  const fixedTotal = R && rcs.length > 0;
   const warnings: string[] = [];
   if (t) {
     const blocked = calc.teamBlocked(t.id).filter((x) => x.id !== id);
@@ -725,13 +739,15 @@ function RequestForm({ id }: { id?: string }) {
       <Kv k="Team"><Select value={f.team_id} onChange={(v) => set({ team_id: v })} options={db.teams.map((x) => [x.id, x.name])} /></Kv>
       <Kv k="Requestor"><Txt value={f.requestor_name} onChange={(v) => set({ requestor_name: v })} placeholder="Coach or treasurer's name" /></Kv>
       <Kv k="Requestor Email"><Txt value={f.requestor_email} onChange={(v) => set({ requestor_email: v })} placeholder="Used to stop them approving their own request" /></Kv>
-      <Kv k="Amount"><Amount value={f.amount} onChange={(v) => set({ amount: v })} /></Kv>
+      <Kv k="Amount">{fixedTotal ? <><b>{money(old!.amount, true)}</b><span className="muted"> · the sum of its {rcs.length} {rcs.length === 1 ? 'receipt' : 'receipts'}; add or remove one on the request</span></>
+        : <Amount value={f.amount} onChange={(v) => set({ amount: v })} />}</Kv>
       <Kv k="Category"><Select value={f.category} onChange={(v) => set({ category: v || REQUEST_CATEGORIES[0] })} options={REQUEST_CATEGORIES.map((c) => [c, c])} /></Kv>
       {R ? <>
         <Kv k="Vendor"><Txt value={f.vendor} onChange={(v) => set({ vendor: v })} /></Kv>
         <Kv k="Purchase Date"><DateIn value={f.purchase_date} onChange={(v) => set({ purchase_date: v })} /></Kv>
         <Kv k="Zelle Contact"><Txt value={f.zelle_contact} onChange={(v) => set({ zelle_contact: v })} placeholder="Phone or email for Zelle" /></Kv>
-        <Kv k="Receipt">{old?.receipt_path && !file ? <><FileLink path={old.receipt_path} name={old.receipt_name} /> </> : null}<input className="in" type="file" accept="image/*,application/pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} /></Kv>
+        {fixedTotal ? <Kv k="Receipts"><span className="muted">{rcs.length} listed on the request</span></Kv>
+          : <Kv k="Receipt">{old?.receipt_path && !file ? <><FileLink path={old.receipt_path} name={old.receipt_name} /> </> : null}<input className="in" type="file" accept="image/*,application/pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} /></Kv>}
         <Kv k="Notes"><Txt value={f.purpose} onChange={(v) => set({ purpose: v })} placeholder="What was bought (optional)" /></Kv>
       </> : <>
         <Kv k="Purpose"><Txt value={f.purpose} onChange={(v) => set({ purpose: v })} placeholder="What the money is for" /></Kv>

@@ -46,6 +46,7 @@ function TeamTopBar({ email }: { email: string }) {
         <span className="pop r">Signed in as {p.me.email || email}.{p.me.role ? ' ' + p.me.role + ' login' : ' Team login'} for {p.team.name}. Two-step sign-in is on.</span>
       </span>
       <Link className="btn sm" href="/team/calendar" title="Your team's practices, scrimmages and competitions, plus community events">Calendar</Link>
+      <Link className="btn sm" href="/team/receipts" title="Your team's receipts, and anything paid still missing one">Receipts</Link>
       <Link className="btn sm" href="/team/history" title="Every change to your team's requests, receipts and money">History</Link>
       <Tip id="team.profile" side="r" text="Your name and the Zelle contact the board pays you back at.">
         <button className="btn sm" onClick={() => ui.open(<ProfileForm />)}>Profile</button>
