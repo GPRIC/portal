@@ -1913,6 +1913,9 @@ end $$;
 --       function, so a new table without the trigger fails the tests.
 --     * Storage: the CPA opens files in the board bucket (problem report files excepted) and can upload, change or remove nothing.
 --   Not for the CPA: Problem Reports (the Treasurer's), team logins and invites, the Calendar, and sign-in history.
+--   Contact details are never the CPA's: tables with email, phone or Zelle columns (board members, donors, requests,
+--   accounts) have no CPA policy; the CPA reads them through <table>_cpa views with those columns null, and History
+--   through change_log_cpa with contact keys removed and email addresses masked.
 --   The one table left writable is seen_tips: the CPA's own "tip already shown" marks, so first-visit tips stop reappearing.
 
 -- ---------------------------------------------------------------- who is the CPA
@@ -1952,22 +1955,82 @@ $$;
 
 -- ---------------------------------------------------------------- read
 
+-- Contact details (emails, phone numbers, Zelle contacts) are never the CPA's: a column whose name matches this is
+-- blanked in everything the CPA reads, and any email address in History text is masked.
+create or replace function public.cpa_contact_col(p_col text)
+returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+  select p_col ~* '(email|phone|mobile|address|contact|zelle)';
+$$;
+
+create or replace function public.cpa_mask_text(p text)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select regexp_replace(p, '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[email hidden]', 'g');
+$$;
+
+-- A History before/after record for the CPA: contact keys removed, any other email address masked.
+create or replace function public.cpa_mask_json(p jsonb)
+returns jsonb
+language sql
+immutable
+set search_path = ''
+as $$
+  select case when p is null or jsonb_typeof(p) <> 'object' then p
+    else public.cpa_mask_text(coalesce((select jsonb_object_agg(k, v) from jsonb_each(p) e(k, v) where not public.cpa_contact_col(k)), '{}'::jsonb)::text)::jsonb end;
+$$;
+grant execute on function public.cpa_contact_col(text), public.cpa_mask_text(text), public.cpa_mask_json(jsonb) to authenticated;
+revoke execute on function public.cpa_contact_col(text), public.cpa_mask_text(text), public.cpa_mask_json(jsonb) from public, anon;
+
+-- The books tables. One without contact columns gets a plain CPA read policy. One with them (board members, donors,
+-- requests, accounts) gets no CPA policy at all, so a direct API select of the table returns nothing for the CPA,
+-- and the CPA reads it through <table>_cpa instead: the same columns, contact columns always null.
+-- security_barrier keeps the CPA filter ahead of anything the caller adds; the view is select only.
 do $$
-declare t text;
+declare t text; cols text;
 begin
   foreach t in array array['settings','teams','funds','board_members','grants','donors','donations','meetings','meeting_votes',
                            'team_requests','ledger','receipts','accounts','documents','request_approvals','bank_statements',
                            'bank_lines','zeffy_skip','zeffy_sync_log','request_refunds','receipt_reminders','money_overrides'] loop
-    execute format('create policy cpa_read on public.%I for select to authenticated using ((select public.is_cpa()))', t);
+    if not exists (select 1 from information_schema.columns c
+                    where c.table_schema = 'public' and c.table_name = t and public.cpa_contact_col(c.column_name)) then
+      execute format('create policy cpa_read on public.%I for select to authenticated using ((select public.is_cpa()))', t);
+    else
+      select string_agg(case when public.cpa_contact_col(c.column_name) then format('null::%s as %I', c.data_type, c.column_name)
+                             else format('x.%I', c.column_name) end, ', ' order by c.ordinal_position)
+        into cols
+        from information_schema.columns c
+       where c.table_schema = 'public' and c.table_name = t;
+      execute format('create view public.%I with (security_barrier = true) as select %s from public.%I x where (select public.is_cpa())',
+                     t || '_cpa', cols, t);
+      execute format('revoke all on public.%I from public, anon, authenticated', t || '_cpa');
+      execute format('grant select on public.%I to authenticated', t || '_cpa');
+    end if;
   end loop;
 end $$;
 
--- History: the CPA sees the log of what it can read. Team logins, invites, the calendar, problem reports and sign-ins stay out.
-create policy cpa_log_books_only on public.change_log as restrictive for select to authenticated
-  using (not (select public.is_cpa())
-         or tbl not in ('team_users','team_invites','calendar_events','problem_reports','sessions','seen_tips',
-                        -- board access and board member records carry names, emails and roles
-                        'portal_access','board_members'));
+-- History: the CPA reads it only through change_log_cpa: the log of what it can read, contact details removed.
+-- Team logins and invites, the calendar, problem reports, sign-ins, board access and board member records stay out.
+create policy cpa_log_none on public.change_log as restrictive for select to authenticated
+  using (not (select public.is_cpa()));
+
+create view public.change_log_cpa with (security_barrier = true) as
+select c.id, c.at, c.user_id, public.cpa_mask_text(c.who) as who, c.role, c.action, c.what, c.tbl, c.record_id,
+       public.cpa_mask_text(c.label) as label, public.cpa_mask_text(c.summary) as summary,
+       public.cpa_mask_json(c.before) as before, public.cpa_mask_json(c.after) as after,
+       c.team_id, c.device, c.via, public.cpa_mask_text(c.reason) as reason, c.rolls_back_id, c.rolled_back_at,
+       public.cpa_mask_text(c.rolled_back_by) as rolled_back_by, public.cpa_mask_text(c.rollback_reason) as rollback_reason
+  from public.change_log c
+ where (select public.is_cpa())
+   and c.tbl not in ('team_users','team_invites','calendar_events','problem_reports','sessions','seen_tips','portal_access','board_members');
+revoke all on public.change_log_cpa from public, anon, authenticated;
+grant select on public.change_log_cpa to authenticated;
 
 -- ---------------------------------------------------------------- never write
 
