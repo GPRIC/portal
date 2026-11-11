@@ -206,6 +206,9 @@ ok(o.length === 1 && o[0].body_text.startsWith('A board member filed') && !/@/.t
 const r5 = await one(C, `select public.submit_team_request($1)`, [JSON.stringify({ ...JSON.parse(preApproval()), purpose: 'Order via parts@example.org' })]);
 o = await outbox(r5);
 ok(o.length === 1 && !/@/.test(o[0].subject + o[0].body_text) && /\[email hidden\]/.test(o[0].body_text), 'an address typed into what it is for is masked');
+const r6 = await one(C, `select public.submit_team_request($1)`, [JSON.stringify({ ...JSON.parse(preApproval()), purpose: 'x'.repeat(70) + ' joe@example.org and pat@gmail' })]);
+o = await outbox(r6);
+ok(o.length === 1 && !/@|examp/.test(o[0].subject + o[0].body_text), 'an address straddling the 80-character subject cut, and one with no dot, leave no fragment: ' + o[0]?.subject);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

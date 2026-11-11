@@ -88,6 +88,8 @@ begin
       v_who := case when new.type = 'Direct Expense' then 'A board member' else 'A team login' end;
     end if;
     v_for := coalesce(nullif(trim(new.purpose), ''), nullif(trim(new.vendor), ''), 'No description');
+    -- Mask anything address-like before the subject cuts it to 80 characters, so no fragment survives the cut.
+    v_for := regexp_replace(v_for, '\S*@\S*', '[email hidden]', 'g');
 
     if new.type = 'Direct Expense' then
       v_kind := 'direct_expense';
@@ -118,8 +120,8 @@ begin
     end if;
 
     -- Belt and braces: any email address typed into a purpose or vendor is masked too.
-    v_subject := regexp_replace(v_subject, '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[email hidden]', 'g');
-    v_body := regexp_replace(v_body, '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[email hidden]', 'g');
+    v_subject := regexp_replace(v_subject, '\S*@\S*', '[email hidden]', 'g');
+    v_body := regexp_replace(v_body, '\S*@\S*', '[email hidden]', 'g');
     insert into public.email_outbox (kind, request_id, subject, body_text, link, to_emails)
     values (v_kind, new.id, v_subject, v_body, '/requests', v_to);
   exception when others then
