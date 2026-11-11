@@ -19,19 +19,21 @@ export type LogRow = {
 const TONE: Record<string, Tone> = {
   Added: 'grn', Changed: 'blu', Deleted: 'red', Archived: 'red', Restored: 'grn', Approved: 'vio', Voted: 'vio', Declined: 'red',
   Paid: 'grn', Closed: 'gry', Cancelled: 'red', Refunded: 'amb', Reviewed: 'blu', Locked: 'gry', Unlocked: 'amb', Imported: 'amb', Synced: 'amb',
-  Invited: 'blu', 'Signed In': 'gry', 'Signed Out': 'gry', Reversed: 'amb', 'Rolled Back': 'amb', Overrode: 'amb', 'Cleared Sample': 'gry',
+  Invited: 'blu', 'Invite Sent': 'blu', 'Invite Failed': 'amb', 'Invite Cancelled': 'gry', 'Invite Reopened': 'blu',
+  'Turned Off': 'red', 'Turned On': 'grn', 'Role Changed': 'vio', 'Direct Expenses Changed': 'vio', 'Signed In': 'gry', 'Signed Out': 'gry', Reversed: 'amb', 'Rolled Back': 'amb', Overrode: 'amb', 'Cleared Sample': 'gry',
 };
 const COLOR: Record<Tone, string> = { grn: 'var(--g)', blu: 'var(--blue)', red: 'var(--red)', vio: 'var(--vio)', amb: 'var(--amb)', gry: 'var(--t3)' };
-const WHATS = ['Ledger', 'Requests', 'Donations', 'Grants', 'Teams', 'Bank', 'Sign-ins', 'Settings', 'Accounts', 'Documents', 'Meetings', 'Calendar', 'Problems'];
+const WHATS = ['Ledger', 'Requests', 'Donations', 'Grants', 'Teams', 'Bank', 'Sign-ins', 'Settings', 'Accounts', 'Documents', 'Meetings', 'Calendar', 'Problems', 'People'];
 const ACTIONS = ['Added', 'Changed', 'Archived', 'Restored', 'Deleted', 'Approved', 'Declined', 'Paid', 'Reviewed', 'Cancelled', 'Refunded', 'Closed', 'Reversed', 'Locked', 'Unlocked',
-  'Imported', 'Synced', 'Invited', 'Signed In', 'Signed Out', 'Rolled Back'];
+  'Imported', 'Synced', 'Invited', 'Signed In', 'Signed Out', 'Rolled Back',
+  'Invite Sent', 'Invite Failed', 'Invite Cancelled', 'Invite Reopened', 'Turned Off', 'Turned On', 'Role Changed', 'Direct Expenses Changed'];
 const RANGES: [string, string][] = [['7', 'Last 7 Days'], ['30', 'Last 30 Days'], ['all', 'All Time']];
 const SORTS: [keyof LogRow, string][] = [['at', 'When'], ['who', 'Who'], ['action', 'Action'], ['label', 'Record'], ['summary', 'What Changed']];
 const OPEN: Record<string, [string, string]> = {
   Ledger: ['/ledger', 'Open In Ledger'], Requests: ['/requests', 'Open In Requests'], Donations: ['/donors', 'Open In Donors'],
   Grants: ['/grants', 'Open In Grants'], Teams: ['/balances', 'Open In Team Balances'], Bank: ['/balances', 'Open In Team Balances'],
   Accounts: ['/accounts', 'Open In Accounts'], Documents: ['/documents', 'Open In Documents'], Meetings: ['/meetings', 'Open In Meetings'],
-  Calendar: ['/calendar', 'Open In Calendar'], Problems: ['/problems', 'Open In Problem Reports'],
+  Calendar: ['/calendar', 'Open In Calendar'], Problems: ['/problems', 'Open In Problem Reports'], People: ['/people', 'Open In People'],
 };
 const ROLE: Record<string, string> = { treasurer: 'Treasurer', board: 'Board', bookkeeper: 'Bookkeeper', cpa: 'CPA', team: 'Team login', system: 'Automatic' };
 const HIDE = new Set(['sample', 'created_at']);
