@@ -5,7 +5,8 @@ import { SUPABASE_KEY, SUPABASE_URL, configured } from '@/lib/supabase/env';
 // Keeps the sign-in session fresh and sends anyone without a finished two-step sign-in to /login.
 // Row security in the database is the real guard; this only routes people.
 // /api/zeffy is called by the Vercel cron and Zeffy's webhook, which check their own secrets.
-const OPEN = ['/login', '/auth', '/setup', '/api/zeffy'];
+// /api/alerts/flush only sends what is already queued (and its cron GET checks CRON_SECRET).
+const OPEN = ['/login', '/auth', '/setup', '/api/zeffy', '/api/alerts'];
 
 export async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;

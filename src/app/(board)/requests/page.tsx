@@ -9,6 +9,7 @@ import { Tip } from '@/components/tips';
 import { date, initials, money, round2, sd, sum } from '@/lib/format';
 import { DIRECT_PAY, PAY_METHODS, PAY_TO, REQUEST_CATEGORIES, REQUEST_TYPES, type PayMethod, type RequestType, type Team, type TeamRequest } from '@/lib/types';
 import type { Calc } from '@/lib/calc';
+import { flushAlerts } from '@/lib/alerts';
 import './requests.css';
 
 /** How a team's money reaches it (the team record, not a request). */
@@ -452,6 +453,7 @@ function CancelForm({ id }: { id: string }) {
     setBusy(false);
     if (res === false) return;
     const o = res as { status: string; replacement: string | null };
+    if (o.replacement) flushAlerts();
     ui.close(); ui.close();
     ui.toast(o.replacement ? 'Cancelled · replacement #' + o.replacement + ' filed' : 'Cancelled · nothing posted to the books');
     if (o.replacement) ui.open(<RequestView id={o.replacement} />);
@@ -563,6 +565,7 @@ function DirectForm() {
     const res = await run(() => rpc('direct_expense_file', { p: { purpose: purpose.trim(), charge_fund_id: fund, pay_method: method, pay_ref: orNull(ref), paid_date: when || calc.today, invoices: rows } }));
     setBusy(false);
     if (res === false) return;
+    flushAlerts();
     const o = res as { id: string; amount: number; warnings?: string[] };
     ui.close();
     if (o.warnings?.length) await ui.confirm({ title: 'Filed, With A Warning', body: <>{o.warnings.map((w, i) => <div key={i}>{w}</div>)}</>, ok: 'OK' });
@@ -737,6 +740,7 @@ function RequestForm({ id }: { id?: string }) {
     };
     const ok = await run(() => rpc('request_save', { p: { ...row, id: old?.id } }), old ? 'Request saved' : 'Request entered · waiting for approval');
     if (ok === false) return;
+    if (!old) flushAlerts();
     ui.close();
   };
   return (

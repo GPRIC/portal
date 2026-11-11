@@ -5,6 +5,7 @@ import { uploadFile } from '@/components/data';
 import { Amount, DateIn, Err, FilePick, num, Select, Txt } from '@/components/forms';
 import { Badge, Check, Kv, Modal, Seg, useUI } from '@/components/ui';
 import { supabase } from '@/lib/supabase/client';
+import { flushAlerts } from '@/lib/alerts';
 import { money } from '@/lib/format';
 import { PAY_TO, REQUEST_CATEGORIES } from '@/lib/types';
 import { friendly, useTeam, type Portal, type TeamReq } from './team-data';
@@ -113,6 +114,7 @@ export function RequestForm({ type: type0, pre }: { type: ReqType; pre?: Prefill
     const { data, error } = await supabase().rpc('submit_team_request', { p: body });
     setBusy(false);
     if (error) { setErr(friendly(error.message)); return; }
+    flushAlerts();
     ui.close();
     ui.toast('Submitted' + (data ? ' ' + data : '') + ' · it is with the board');
     await reload();
