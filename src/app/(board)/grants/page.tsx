@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { Page } from '@/components/shell';
+import { ListExport } from '@/components/export';
 import { rpc, uploadFile, useData } from '@/components/data';
 import { Amount, Area, DateIn, DocOpen, Err, Foot, FundSelect, num, orNull, str, Txt } from '@/components/forms';
 import { Badge, Card, Check, Kv, Lines, Modal, Pills, Seg, St, ST, Table, useUI, type Col } from '@/components/ui';
@@ -25,7 +26,7 @@ export default function GrantsPage() {
     { k: 'ask', label: 'Ask', num: true, html: (r) => money(r.ask) },
     { k: 'awarded', label: 'Awarded', num: true, html: (r) => (r.awarded ? money(r.awarded) : '') },
     { k: 'status', label: 'Status', html: (r) => <><St s={r.status} />{r.status === 'Awarded' && r.received < r.awarded ? <> <Badge tone="amb">Not Received</Badge></> : null}</> },
-    { k: 'deadline', label: 'Deadline', sv: (r) => r.deadline || '9999', html: (r) => {
+    { k: 'deadline', label: 'Deadline', sv: (r) => r.deadline || '9999', xv: (r) => r.deadline || 'Rolling', html: (r) => {
       const late = r.deadline && r.deadline >= T && daysBetween(T, r.deadline) <= 10 && open(r);
       return r.deadline ? (late ? <Badge tone="red">{date(r.deadline)}</Badge> : date(r.deadline)) : 'Rolling';
     } },
@@ -33,8 +34,9 @@ export default function GrantsPage() {
     { k: 'owner', label: 'Owner' },
     { k: 'board_saw', label: 'Board Saw', html: (r) => (r.board_saw ? <Badge tone="grn">{sd(r.board_saw)}</Badge> : <Badge tone="amb">Not Yet</Badge>) },
   ];
+  const shown = all.filter((x) => filt === 'All' || x.status === filt);
   return (
-    <Page title="Grants Pipeline" help="grants" actions={<button className="btn pri" onClick={() => ui.open(<GrantForm />)}>New Grant</button>}>
+    <Page title="Grants Pipeline" help="grants" tools={<ListExport name="Grants" cols={cols} rows={shown} />} actions={<button className="btn pri" onClick={() => ui.open(<GrantForm />)}>New Grant</button>}>
       <div className="cards">
         <Card n="In The Pipeline" v={money(g.openAsk)} tip={g.open.length + ' open asks · weighted ' + money(g.weighted)} />
         <Card n="Awarded" v={money(g.awardedTotal)} tip={'Received ' + money(g.receivedTotal) + ' · still to arrive ' + money(g.pending)} />
@@ -43,7 +45,7 @@ export default function GrantsPage() {
       </div>
       <div className="panel">
         <Pills items={[{ key: 'All', label: 'All', count: all.length }, ...GRANT_STATUSES.map((s) => ({ key: s, label: s, tone: ST[s] || ('red' as const), count: all.filter((x) => x.status === s).length }))]} active={filt} onPick={setFilt} />
-        <Table cols={cols} rows={all.filter((x) => filt === 'All' || x.status === filt)} sort="deadline" onRow={(r) => ui.open(<GrantForm id={r.id} />)} />
+        <Table cols={cols} rows={shown} sort="deadline" onRow={(r) => ui.open(<GrantForm id={r.id} />)} />
       </div>
     </Page>
   );

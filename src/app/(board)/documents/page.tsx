@@ -2,6 +2,7 @@
 import { Suspense, useMemo, useState, type ReactNode } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Page } from '@/components/shell';
+import { ListExport } from '@/components/export';
 import { BoardReceipts, boardReceiptRows } from '@/components/receipts/board-receipts';
 import { receiptSummary } from '@/components/receipts/receipts';
 import { rpc, uploadFile, useData } from '@/components/data';
@@ -43,7 +44,7 @@ function Documents() {
   );
   if (tab === 'Receipts') {
     return (
-      <Page title="Documents" help="documents" actions={<input className="in rq-srch" placeholder="Search vendor, request, person" value={q} onChange={(e) => setQ(e.target.value)} />}>
+      <Page title="Documents" help="documents" tools={<input className="in rq-srch" placeholder="Search vendor, request, person" value={q} onChange={(e) => setQ(e.target.value)} />}>
         {tabs}
         <BoardReceipts q={q} />
       </Page>
@@ -60,19 +61,20 @@ function DocumentsTab({ tabs }: { tabs: ReactNode }) {
   const items = [{ key: 'All', label: 'All', count: all.length }, { key: 'Public', label: 'Public', tone: 'grn' as Tone, count: all.filter((d) => d.public).length },
     ...DOC_TYPES.map((t) => ({ key: t, label: t, tone: TONE[t], count: all.filter((d) => d.type === t).length }))];
   const cols: Col<Doc>[] = [
-    { k: 'title', label: 'Document', html: (d) => <DocOpen doc={d} /> },
+    { k: 'title', label: 'Document', xv: (d) => d.title, html: (d) => <DocOpen doc={d} /> },
     { k: 'type', label: 'Type', html: (d) => <Badge tone={TONE[d.type]}>{d.type}</Badge> },
     { k: 'linked_to', label: 'Linked To', sv: (d) => linked(calc, d.linked_to), html: (d) => linked(calc, d.linked_to) },
     { k: 'date', label: 'Date', html: (d) => date(d.date) },
-    { k: 'public', label: 'Public', sv: (d) => (d.public ? 1 : 0), html: (d) => (d.public ? <Badge tone="grn">Public</Badge> : <Badge tone="vio">Board</Badge>) },
+    { k: 'public', label: 'Public', sv: (d) => (d.public ? 1 : 0), xv: (d) => (d.public ? 'Public' : 'Board'), html: (d) => (d.public ? <Badge tone="grn">Public</Badge> : <Badge tone="vio">Board</Badge>) },
     { k: 'added_by', label: 'Added By' },
   ];
+  const shown = all.filter((d) => filt === 'All' || (filt === 'Public' ? d.public : d.type === filt));
   return (
-    <Page title="Documents" help="documents" actions={<button className="btn pri" onClick={() => ui.open(<DocForm />)}>Add Document</button>}>
+    <Page title="Documents" help="documents" tools={<ListExport name="Documents" cols={cols} rows={shown} />} actions={<button className="btn pri" onClick={() => ui.open(<DocForm />)}>Add Document</button>}>
       {tabs}
       <div className="panel">
         <Pills items={items} active={filt} onPick={setFilt} />
-        <Table cols={cols} rows={all.filter((d) => filt === 'All' || (filt === 'Public' ? d.public : d.type === filt))} sort="date" dir={-1} onRow={(d) => ui.open(<DocForm id={d.id} />)} />
+        <Table cols={cols} rows={shown} sort="date" dir={-1} onRow={(d) => ui.open(<DocForm id={d.id} />)} />
       </div>
     </Page>
   );

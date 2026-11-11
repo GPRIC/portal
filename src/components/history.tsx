@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { initials } from '@/lib/format';
 import { Badge, Modal, useUI, type Tone } from '@/components/ui';
+import { saveSheet } from '@/components/export';
 
 export type LogRow = {
   id: number; at: string; user_id: string | null; who: string; role: string | null; action: string; what: string; tbl: string;
@@ -44,6 +45,19 @@ function when(ts: string, year?: boolean) {
   let h = d.getHours(); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
   return `${MON[d.getMonth()]} ${d.getDate()}${year ? ', ' + d.getFullYear() : ''}, ${h}:${String(d.getMinutes()).padStart(2, '0')} ${ap}`;
 }
+/** The History query with the filters applied (paging and order added by the caller). */
+function query(team: boolean | undefined, f: F) {
+  let q = supabase().from(team ? 'change_log_team' : 'change_log').select('*', { count: 'exact' });
+  const s = since(f.range);
+  if (s && !f.rec) q = q.gte('at', s);
+  if (f.who.length) q = q.in('who', f.who);
+  if (f.what.length) q = q.in('what', f.what);
+  if (f.act.length) q = q.in('action', f.act);
+  if (f.rec) q = q.eq('tbl', f.rec.tbl).eq('record_id', f.rec.id);
+  const term = f.q.trim().replace(/[%,()*]/g, ' ').trim();
+  if (term) q = q.or(`label.ilike.%${term}%,summary.ilike.%${term}%,who.ilike.%${term}%`);
+  return q;
+}
 const shortWho = (w: string) => w.replace(/ —.*/, '').replace(/ \(.*/, '');
 
 /** "Chrome on Windows" from a browser's user agent; a job's own description is shown as it is. */
@@ -71,7 +85,7 @@ function since(range: string) {
   return d.toISOString();
 }
 
-export function History({ canRollBack, team }: { canRollBack: boolean; team?: boolean }) {
+export function History({ canRollBack, team, canExport }: { canRollBack: boolean; team?: boolean; canExport?: boolean }) {
   const ui = useUI();
   const [f, setF] = useState<F>(fresh);
   const [sort, setSort] = useState<{ k: keyof LogRow; asc: boolean }>({ k: 'at', asc: false });
@@ -88,16 +102,7 @@ export function History({ canRollBack, team }: { canRollBack: boolean; team?: bo
 
   useEffect(() => {
     let live = true;
-    let q = supabase().from(team ? 'change_log_team' : 'change_log').select('*', { count: 'exact' });
-    const s = since(f.range);
-    if (s && !f.rec) q = q.gte('at', s);
-    if (f.who.length) q = q.in('who', f.who);
-    if (f.what.length) q = q.in('what', f.what);
-    if (f.act.length) q = q.in('action', f.act);
-    if (f.rec) q = q.eq('tbl', f.rec.tbl).eq('record_id', f.rec.id);
-    const term = f.q.trim().replace(/[%,()*]/g, ' ').trim();
-    if (term) q = q.or(`label.ilike.%${term}%,summary.ilike.%${term}%,who.ilike.%${term}%`);
-    q = q.order(sort.k, { ascending: sort.asc }).order('id', { ascending: sort.asc }).range(page * per, page * per + per - 1);
+    const q = query(team, f).order(sort.k, { ascending: sort.asc }).order('id', { ascending: sort.asc }).range(page * per, page * per + per - 1);
     q.then(({ data, error, count: n }) => {
       if (!live) return;
       setBusy(false);
@@ -121,6 +126,24 @@ export function History({ canRollBack, team }: { canRollBack: boolean; team?: bo
   const hidden = f.who.length + f.what.length + f.act.length > 0;
   const any = hidden || f.range !== '7' || !!f.rec || !!f.q;
   const pages = Math.max(1, Math.ceil(count / per));
+  const [saving, setSaving] = useState(false);
+  /** Every row the filters match, not only this page, oldest last as sorted on screen. */
+  const exportAll = async () => {
+    setSaving(true);
+    try {
+      const all: LogRow[] = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await query(team, f).order(sort.k, { ascending: sort.asc }).order('id', { ascending: sort.asc }).range(from, from + 999);
+        if (error) throw new Error(error.message);
+        all.push(...((data || []) as LogRow[]));
+        if (!data || data.length < 1000) break;
+      }
+      await saveSheet('History', ['When', 'Who', 'Role', 'Action', 'Area', 'Record', 'What Changed', 'Reason', 'Rolled Back'],
+        all.map((r) => [r.at, r.who, ROLE[r.role || ''] || r.role, r.action, r.what, r.label || r.tbl, r.summary, r.reason, r.rolled_back_at ? when(r.rolled_back_at, true) + ' · ' + (r.rollback_reason || '') : null]));
+      ui.toast(all.length + (all.length === 1 ? ' row' : ' rows') + ' exported');
+    } catch (e) { ui.toast('Export failed: ' + (e as Error).message, true); }
+    setSaving(false);
+  };
   const open = (r: LogRow) => ui.open(<Detail r={r} canRollBack={canRollBack} team={team} onRecord={(rec) => { ui.close(); upd({ rec }); }} onDone={reload} />);
 
   return (
@@ -134,6 +157,7 @@ export function History({ canRollBack, team }: { canRollBack: boolean; team?: bo
         {f.rec ? <button type="button" className="fp on" onClick={() => upd({ rec: null })} title="Showing every change to this one record. Click to show all records again."><span className="fk">Record</span>{f.rec.label}<span className="clr">×</span></button> : null}
         {any ? <button type="button" className="lnk" style={{ flex: 'none', marginLeft: 8 }} onClick={() => { setF(fresh()); setPage(0); setMenu(false); }}>Clear Filters</button> : null}
         <input className="in srch" placeholder="Search records, people, changes" value={f.q} onChange={(e) => upd({ q: e.target.value })} />
+        {canExport ? <button type="button" className="btn" style={{ flex: 'none', marginLeft: 8 }} onClick={exportAll} disabled={saving} title={'Save the ' + count + ' entries the filters match to an Excel file'}>{saving ? 'Exporting…' : 'Export Excel'}</button> : null}
       </div>
       <div className="scroll">
         <table>
@@ -241,7 +265,7 @@ function Detail({ r, canRollBack, team, onRecord, onDone }: {
   };
 
   return (
-    <Modal wide title={r.action + ' · ' + (r.label || r.tbl)} foot={<>
+    <Modal wide view title={r.action + ' · ' + (r.label || r.tbl)} foot={<>
       <button className="btn" onClick={ui.close}>Cancel</button>
       {canRollBack ? (why
         ? <span title={why}><button className="btn amb-btn" disabled>{rbLabel}</button></span>

@@ -57,7 +57,7 @@ export function TeamModal({ fundId }: { fundId: string }) {
 
   const inn = m.carry + m.zeffy + m.deposits, out = m.reimbursements + m.direct;
   return (
-    <Modal title={name} wide foot={<><button className="btn" onClick={ui.close}>Close</button><button className="btn" onClick={csv} disabled={!rows.length}>Export CSV</button></>}>
+    <Modal view title={name} wide foot={<><button className="btn" onClick={ui.close}>Close</button><button className="btn" onClick={csv} disabled={!rows.length}>Export CSV</button></>}>
       <div className="full bal-sum">
         <span className="muted">Balance <b>{m.balance < 0 ? <span className="neg">{cash(m.balance)}</span> : <Cash n={m.balance} />}</b></span>
         <span className="muted">In {cash(inn)}</span>

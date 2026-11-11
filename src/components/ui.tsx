@@ -73,6 +73,8 @@ export function Pills({ items, active, onPick }: { items: Pill[]; active: string
 export type Col<T> = {
   k: string; label: string; num?: boolean; nosort?: boolean; desc?: boolean;
   sv?: (r: T) => string | number | boolean | null | undefined; html?: (r: T) => ReactNode;
+  /** The value an Excel export writes, when the sort value is only a sort key (P35). */
+  xv?: (r: T) => unknown;
 };
 export function Table<T extends { id: string }>({ cols, rows, sort, dir = 1, onRow, empty, foot }: {
   cols: Col<T>[]; rows: T[]; sort?: string; dir?: 1 | -1; onRow?: (r: T) => void; empty?: string; foot?: ReactNode;
@@ -241,9 +243,21 @@ export function UIHost() {
   );
 }
 
-export function Modal({ title, children, foot, wide, onClose }: { title: string; children: ReactNode; foot?: ReactNode; wide?: boolean; onClose?: () => void }) {
+/* ---------- read only (the CPA, P35) ---------- */
+const RoCtx = createContext(false);
+/** Set by the board's data provider: true for the CPA, who changes nothing (the database refuses every write too). */
+export const ReadOnlyProvider = RoCtx.Provider;
+export const useReadOnly = () => useContext(RoCtx);
+
+/** view: a modal that only shows or picks things (an export, About This Page), so it stays usable when read only.
+ *  Any other modal is a form: read only, its fields are locked and its footer is a single Close button. */
+export function Modal({ title, children, foot, wide, onClose, view }: { title: string; children: ReactNode; foot?: ReactNode; wide?: boolean; onClose?: () => void; view?: boolean }) {
   const ui = useContext(Ctx);
   const close = onClose || ui?.close || (() => {});
+  if (useContext(RoCtx) && !view) {
+    foot = <><span /><button type="button" className="btn" onClick={close}>Close</button></>;
+    children = <fieldset disabled className="ro-lock">{children}</fieldset>;
+  }
   return (
     <div className="ov" onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
       <div className={'modal' + (wide ? ' wide' : '')} role="dialog" aria-modal="true" aria-label={title}>

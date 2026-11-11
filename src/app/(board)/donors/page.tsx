@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { Page } from '@/components/shell';
+import { ListExport } from '@/components/export';
 import { rpc, useData } from '@/components/data';
 import { Amount, Area, DateIn, Err, Foot, FundSelect, num, orNull, Select, Txt } from '@/components/forms';
 import { Badge, Card, Check, Kv, Lines, Modal, Pills, Seg, Table, useUI, type Col, type Tone } from '@/components/ui';
@@ -39,11 +40,11 @@ export default function DonorsPage() {
     { k: 'total', label: 'This Year', num: true, html: (d) => money(d.total) },
     { k: 'last', label: 'Last Gift', html: (d) => sd(d.last) },
     { k: 'funds', label: 'Restricted To' },
-    { k: 'public', label: 'Public Listing', sv: (d) => (d.public && !d.anonymous ? 1 : 0), html: (d) => (d.public && !d.anonymous ? <Badge tone="grn">Yes</Badge> : <Badge>No</Badge>) },
-    { k: 'unthanked', label: 'Thanked', html: (d) => (d.unthanked ? <Badge tone="amb">{d.unthanked + ' Due'}</Badge> : <Badge tone="grn">Yes</Badge>) },
+    { k: 'public', label: 'Public Listing', sv: (d) => (d.public && !d.anonymous ? 1 : 0), xv: (d) => (d.public && !d.anonymous ? 'Yes' : 'No'), html: (d) => (d.public && !d.anonymous ? <Badge tone="grn">Yes</Badge> : <Badge>No</Badge>) },
+    { k: 'unthanked', label: 'Thanked', xv: (d) => (d.unthanked ? d.unthanked + ' Due' : 'Yes'), html: (d) => (d.unthanked ? <Badge tone="amb">{d.unthanked + ' Due'}</Badge> : <Badge tone="grn">Yes</Badge>) },
   ];
   return (
-    <Page title="Donors" help="donors" actions={<button className="btn pri" onClick={() => ui.open(<LogDonation />)}>Log Donation</button>}>
+    <Page title="Donors" help="donors" tools={<ListExport name="Donors" cols={cols} rows={all.filter(fn)} />} actions={<button className="btn pri" onClick={() => ui.open(<LogDonation />)}>Log Donation</button>}>
       <div className="cards">
         <Card n="Donors" v={String(all.length)} tip={all.filter((d) => d.anonymous).length + ' asked to stay anonymous · ' + all.filter((d) => d.public && !d.anonymous).length + ' listed publicly'} />
         <Card n="Monthly Giving" v={money(monthlyRate) + '/mo'} tip={monthly.length + ' monthly donors'} />

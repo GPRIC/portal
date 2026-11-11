@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Page } from '@/components/shell';
+import { ListExport } from '@/components/export';
 import { rpc, uploadFile, useData } from '@/components/data';
 import { Amount, Area, DateIn, Err, FileLink, Foot, FundSelect, num, orNull, Select, str, Txt } from '@/components/forms';
 import { Badge, Check, Kv, Lines, Modal, Seg, Table, useUI, Warnings, type Col, type Tone } from '@/components/ui';
@@ -136,8 +137,14 @@ export default function RequestsPage() {
     }
   };
 
+  const xcols: Col<TeamRequest>[] = [
+    { k: 'id', label: 'Request' }, { k: 'submitted', label: 'Date' }, { k: 'type', label: 'Type' }, { k: 'purpose', label: 'Purpose' },
+    { k: 'vendor', label: 'Vendor' }, { k: 'category', label: 'Category' }, { k: 'charge', label: 'Charge To', xv: (r) => calc.chargeTo(r) },
+    { k: 'amount', label: 'Amount' }, { k: 'refund', label: 'Refunded', xv: (r) => calc.refundFor(r.id)?.amount ?? null }, { k: 'net', label: 'Net', xv: (r) => netCost(calc, r) },
+    { k: 'status', label: 'Status' }, { k: 'filer', label: 'Filed By', xv: (r) => requestor(r) }, { k: 'paid_date', label: 'Paid' },
+  ];
   return (
-    <Page title="Requests" help="requests" actions={<>
+    <Page title="Requests" help="requests" tools={<ListExport name="Requests" cols={xcols} rows={rows} />} actions={<>
       <Tip id="requests.rules" side="r" text="Approval Rules: set the dollar threshold and how many board approvals each side of it needs.">
         <button className="ib" title="Approval Rules" aria-label="Approval Rules" onClick={() => ui.open(<RulesForm />)}>{GEAR}</button>
       </Tip>

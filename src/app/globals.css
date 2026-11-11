@@ -133,6 +133,11 @@ tfoot td { color: var(--t2); font-weight: 600; border-bottom: none; }
 .mb { padding: 14px; display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 9px 12px; align-items: center; }
 .mb .k { color: var(--t3); }
 .mb .full { grid-column: 1 / -1; }
+/* Read only (the CPA, P35): a form's fields are locked in place; the fieldset adds no box of its own. */
+fieldset.ro-lock { display: contents; border: 0; margin: 0; padding: 0; min-width: 0; }
+fieldset.ro-lock .btn, fieldset.ro-lock input[type=file] { display: none; }
+fieldset.ro-lock .in:disabled, fieldset.ro-lock .seg .opt:disabled, fieldset.ro-lock .btn:disabled { opacity: .75; cursor: default; }
+.chip.ro { color: var(--amb); border-color: var(--amb); font-weight: 600; }
 @media (max-width: 480px) { .mb { grid-template-columns: 1fr; } .mb .k { margin-top: 4px; } }
 .mf { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--bs); flex-wrap: wrap; }
 .steps { display: grid; gap: 6px; }

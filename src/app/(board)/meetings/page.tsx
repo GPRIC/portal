@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { Page } from '@/components/shell';
+import { ListExport } from '@/components/export';
 import { rpc, uploadFile, useData } from '@/components/data';
 import { Area, DateIn, Err, FileLink, Foot, num, orNull, Select, Txt } from '@/components/forms';
 import { Badge, Card, Check, Kv, Lines, Modal, Seg, Table, useUI, type Col, type Tone } from '@/components/ui';
@@ -27,12 +28,14 @@ export default function MeetingsPage() {
     { k: 'kind', label: 'Kind' },
     { k: 'status', label: 'Status', html: (m) => <Badge tone={STT[m.status]}>{m.status}</Badge> },
     { k: 'votes', label: 'Votes', num: true, sv: (m) => votesOf(m).length, html: (m) => String(votesOf(m).length) },
-    { k: 'out', label: 'Stepped Out', sv: (m) => outOf(m).length, html: (m) => outOf(m).map((u) => calc.memberTitle(u)).join(', ') },
-    { k: 'doc', label: 'Minutes', nosort: true, html: (m) => <MeetingDoc m={m} /> },
+    { k: 'out', label: 'Stepped Out', sv: (m) => outOf(m).length, xv: (m) => outOf(m).map((u) => calc.memberTitle(u)).join(', '), html: (m) => outOf(m).map((u) => calc.memberTitle(u)).join(', ') },
+    { k: 'doc', label: 'Minutes', nosort: true, xv: (m) => m.minutes_name || m.minutes_link || m.agenda_name || m.agenda_link || (m.minutes_path || m.agenda_path ? 'Filed' : 'Not Filed'), html: (m) => <MeetingDoc m={m} /> },
   ];
   return (
-    <Page title="Meetings And Votes" help="meetings" actions={<>
+    <Page title="Meetings And Votes" help="meetings" tools={<>
+      <ListExport name="Meetings" cols={cols} rows={db.meetings} />
       <button className="btn" onClick={() => ui.open(<MembersList />)}>Board Members</button>
+    </>} actions={<>
       <button className="btn pri" onClick={() => ui.open(<MeetingForm />)}>Add Meeting</button>
     </>}>
       <div className="cards">

@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { Page } from '@/components/shell';
+import { ListExport } from '@/components/export';
 import { rpc, uploadFile, useData } from '@/components/data';
 import { Amount, Area, DateIn, Err, FilePick, Foot, FundSelect, num, orNull, Select, str, Txt } from '@/components/forms';
 import { Badge, Card, Check, Kv, Lines, Modal, Pills, Seg, Table, useUI, Warnings, type Col, type Tone } from '@/components/ui';
@@ -12,7 +13,7 @@ const CATEGORIES = ['Space', 'Equipment', 'Administration', 'Robotics Teams'] as
 const IN_SOURCES = ['Fundraising', 'Interest', 'Refund', 'Other', 'Opening Balance'] as const;
 
 export default function LedgerPage() {
-  const { db, calc } = useData();
+  const { db, calc, readOnly } = useData();
   const ui = useUI();
   const [filt, setFilt] = useState('All');
   const c = calc.cash(), src = calc.inBySource(), out = calc.outByCategory();
@@ -29,7 +30,7 @@ export default function LedgerPage() {
     { k: 'out', label: 'Out', num: true, html: (r) => money(r.out) },
     { k: 'balance', label: 'Balance', num: true, html: (r) => money(r.balance) },
     { k: 'purpose', label: 'Purpose' },
-    { k: 'edit', label: '', nosort: true, html: (r) => <button className="btn sm" onClick={() => ui.open(<FundForm id={r.id} />)}>Edit</button> },
+    ...(readOnly ? [] : [{ k: 'edit', label: '', nosort: true, html: (r: FR) => <button className="btn sm" onClick={() => ui.open(<FundForm id={r.id} />)}>Edit</button> }]),
   ];
 
   const L = db.ledger;
@@ -55,7 +56,7 @@ export default function LedgerPage() {
   ];
 
   return (
-    <Page title="Ledger" help="ledger" actions={<>
+    <Page title="Ledger" help="ledger" tools={<ListExport name="Ledger" cols={cols} rows={L.filter(fn)} />} actions={<>
       <button className="btn" onClick={() => ui.open(<EntryForm dir="in" />)}>Record Money In</button>
       <button className="btn pri" onClick={() => ui.open(<EntryForm dir="out" />)}>Add Expense</button>
     </>}>
@@ -67,10 +68,10 @@ export default function LedgerPage() {
         <Card n="Money Out" v={money(calc.spent())} color="red" tip={<><Lines lines={Object.keys(out).map((k) => k + ': ' + money(out[k]))} /><div>Team money returned is netted from Robotics Teams.</div></>} />
       </div>
       <div className="panel">
-        <div className="ph"><h2>Funds</h2><span className="sp" /><button className="btn sm" onClick={() => ui.open(<FundForm />)}>Add Fund</button></div>
+        <div className="ph"><h2>Funds</h2><span className="sp" />{readOnly ? null : <button className="btn sm" onClick={() => ui.open(<FundForm />)}>Add Fund</button>}</div>
         <Table cols={fundCols} rows={fundRows} sort="balance" dir={-1}
           onRow={(r) => { setFilt('F:' + r.id); document.getElementById('tx')?.scrollIntoView({ block: 'start' }); }}
-          foot={<tr><td>Total</td><td /><td className="num">{money(sum(fundRows, (r) => r.opening))}</td><td className="num">{money(sum(fundRows, (r) => r.inn))}</td><td className="num">{money(sum(fundRows, (r) => r.out))}</td><td className="num">{money(c.total)}</td><td /><td /></tr>} />
+          foot={<tr><td>Total</td><td /><td className="num">{money(sum(fundRows, (r) => r.opening))}</td><td className="num">{money(sum(fundRows, (r) => r.inn))}</td><td className="num">{money(sum(fundRows, (r) => r.out))}</td><td className="num">{money(c.total)}</td><td />{readOnly ? null : <td />}</tr>} />
       </div>
       <div className="panel" id="tx">
         <div className="ph"><h2>Transactions</h2></div>
@@ -202,7 +203,7 @@ function ReversedEntry({ l }: { l: Ledger }) {
   const ui = useUI();
   const other = db.ledger.find((x) => x.id === (l.reverses_id || l.reversed_by_id));
   return (
-    <Modal title={l.memo || 'Transaction'}>
+    <Modal view title={l.memo || 'Transaction'}>
       <Kv k="Status">{l.reverses_id ? <Badge tone="vio">Reversal</Badge> : <Badge>Reversed</Badge>}</Kv>
       <Kv k="Amount">{money(l.amount, true)} {l.dir === 'in' ? 'into' : 'out of'} {calc.fundName(l.fund_id)}</Kv>
       <Kv k="Date">{date(l.date)}</Kv>

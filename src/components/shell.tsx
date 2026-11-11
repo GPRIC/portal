@@ -10,10 +10,12 @@ import { HELP } from '@/lib/help';
 import { initials } from '@/lib/format';
 import { DataProvider, useData } from './data';
 import { ROLE_LABEL } from '@/lib/types';
-import { Modal, UIHost, UIProvider, useUI } from './ui';
+import { Modal, UIHost, UIProvider, useReadOnly, useUI } from './ui';
 import { TipsProvider } from './tips';
 import { Icon, ReportProblem } from './problems/report-problem';
 
+/** Pages the CPA does not see (P35): the calendar is the board's and the teams', not the books. */
+export const NOT_FOR_CPA = ['/calendar'];
 export const NAV: [string, string][] = [
   ['/dashboard', 'Dashboard'], ['/grants', 'Grants'], ['/donors', 'Donors'], ['/requests', 'Requests'],
   ['/balances', 'Team Balances'], ['/ledger', 'Ledger'], ['/accounts', 'Accounts'], ['/documents', 'Documents'], ['/meetings', 'Meetings'],
@@ -60,18 +62,20 @@ export function ThemeToggle() {
 function TopBar() {
   const path = usePathname();
   const router = useRouter();
-  const { me, user, role, isTreasurer } = useData();
+  const { me, user, role, isTreasurer, readOnly } = useData();
   const signOut = async () => { await supabase().auth.signOut(); router.replace('/login'); router.refresh(); };
   return (
     <header className="top">
       <Link className="brand" href="/dashboard"><span className="dotb" />GPRIC</Link>
       <span className="area">Board</span>
       <nav className="nav" aria-label="Board pages">
-        {NAV.map(([href, label]) => <Link key={href} href={href} className={path === href ? 'on' : ''}>{label}</Link>)}
+        {NAV.filter(([href]) => !readOnly || !NOT_FOR_CPA.includes(href)).map(([href, label]) => <Link key={href} href={href} className={path === href ? 'on' : ''}>{label}</Link>)}
         {/* P37: Problem Reports is the Treasurer's only (row security too) */}
         {isTreasurer ? <Link href="/problems" className={'lockd' + (path === '/problems' ? ' on' : '')} title="Only you see this page in the menu"><Icon.lock />Problem Reports</Link> : null}
       </nav>
-      <ReportProblem who={me} role={role ? ROLE_LABEL[role] : undefined} />
+      {/* The CPA files nothing, problem reports included (0012_cpa.sql) */}
+      {readOnly ? <span className="chip ro" title="The CPA login reads the books and exports them. It cannot add, change or upload anything.">Read only (CPA)</span>
+        : <ReportProblem who={me} role={role ? ROLE_LABEL[role] : undefined} />}
       <span className="chip who" tabIndex={0}>
         <span className="av grn">{initials(me)}</span><span className="who-name">{me}</span>
         {role ? <span className="muted who-role">{ROLE_LABEL[role]}</span> : null}
@@ -83,11 +87,13 @@ function TopBar() {
   );
 }
 
-export function Page({ title, help, actions, children }: { title: string; help?: string; actions?: ReactNode; children: ReactNode }) {
+/** actions: buttons that change something, hidden when read only (the CPA). tools: buttons that only read, such as exports. */
+export function Page({ title, help, actions, tools, children }: { title: string; help?: string; actions?: ReactNode; tools?: ReactNode; children: ReactNode }) {
   const ui = useUI();
+  const readOnly = useReadOnly();
   const h = help ? HELP[help] : null;
   const about = () => h && ui.open(
-    <Modal title="About This Page" foot={<><span /><button className="btn" onClick={ui.close}>Close</button></>}>
+    <Modal view title="About This Page" foot={<><span /><button className="btn" onClick={ui.close}>Close</button></>}>
       <div className="full helpsec">
         <h4>What This Page Is For</h4><p>{h.purpose}</p>
         <h4>How It Works</h4><ol>{h.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>
@@ -102,7 +108,7 @@ export function Page({ title, help, actions, children }: { title: string; help?:
         <h1>{title}</h1>
         {h ? <button className="btn about" onClick={about}>About This Page</button> : null}
         <span className="sp" />
-        <span className="acts">{actions}</span>
+        <span className="acts">{tools}{readOnly ? null : actions}</span>
       </div>
       {children}
     </div>

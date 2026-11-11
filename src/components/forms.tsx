@@ -41,7 +41,8 @@ export function FundSelect({ value, onChange, balances, blank }: { value: string
 
 export function FileLink({ path, name, label }: { path: string | null | undefined; name?: string | null; label?: string }) {
   if (!path) return null;
-  return <button type="button" className="doclink" onClick={() => openFile(path)}>{label || name || 'Open file'}</button>;
+  // A link, not a button, so it still opens inside a read-only (disabled) form.
+  return <a href="#" role="button" className="doclink" onClick={(e) => { e.preventDefault(); openFile(path); }}>{label || name || 'Open file'}</a>;
 }
 
 /** A file already saved (with open and remove), or a picker for a new one. */

@@ -2,7 +2,8 @@
 // Monthly Reconciliation: the bank statement for a month, its lines matched to portal records, the workbook SOP
 // (bank ending balance = book balance + outstanding checks and Zelle − Zeffy payouts in transit), and the lock.
 import { useEffect, useRef, useState } from 'react';
-import { openFile, rpc, uploadFile, useData } from '@/components/data';
+import { rpc, uploadFile, useData } from '@/components/data';
+import { FileLink } from '@/components/forms';
 import { Badge, Modal, Table, useUI, type Col } from '@/components/ui';
 import { Tip } from '@/components/tips';
 import { date, monthName, sd } from '@/lib/format';
@@ -36,7 +37,7 @@ function saveMatch(id: string, m: Match | null) {
 }
 
 export function ReconcilePanel({ month, setMonth }: { month: string; setMonth: (m: string) => void }) {
-  const { db, calc, run, isTreasurer } = useData();
+  const { db, calc, run, isTreasurer, readOnly } = useData();
   const ui = useUI();
   const st = db.bank_statements.find((s) => s.month === month);
   const locked = !!st?.locked_at;
@@ -104,7 +105,7 @@ export function ReconcilePanel({ month, setMonth }: { month: string; setMonth: (
   const mrows: MR[] = [...months].map((m) => ({ id: m, month: m, s: db.bank_statements.find((x) => x.month === m) }));
   const mcols: Col<MR>[] = [
     { k: 'month', label: 'Month', html: (r) => <span style={r.month === month ? { color: 'var(--g)' } : undefined}>{monthName(r.month).replace(/^(\w{3})\w*/, '$1')}</span> },
-    { k: 'status', label: 'Status', sv: (r) => (r.s?.locked_at ? 1 : 0), html: (r) => (r.s?.locked_at ? <Badge tone="grn">Reconciled</Badge> : <Badge tone="amb">Not Reconciled</Badge>) },
+    { k: 'status', label: 'Status', sv: (r) => (r.s?.locked_at ? 1 : 0), xv: (r) => (r.s?.locked_at ? 'Reconciled' : 'Not Reconciled'), html: (r) => (r.s?.locked_at ? <Badge tone="grn">Reconciled</Badge> : <Badge tone="amb">Not Reconciled</Badge>) },
     { k: 'by', label: 'Reconciled By', sv: (r) => r.s?.locked_by || '', html: (r) => (r.s?.locked_at ? (r.s.locked_by || 'Board').split('@')[0] + ' · ' + sd(r.s.locked_at) : '') },
     { k: 'bal', label: 'Bank Balance', num: true, sv: (r) => (r.s?.locked_at ? r.s.ending_balance ?? 0 : 0), html: (r) => (r.s?.locked_at && r.s.ending_balance != null ? cash(r.s.ending_balance) : '') },
   ];
@@ -116,14 +117,15 @@ export function ReconcilePanel({ month, setMonth }: { month: string; setMonth: (
         <div className="k">Bank Statement</div>
         <div className="v">
           <span className="btnrow" style={{ justifyContent: 'flex-end' }}>
-            {st?.file_path ? <button type="button" className="doclink" onClick={() => openFile(st.file_path!)}>{st.file_name || 'Statement'}</button> : <span className="muted">None yet</span>}
-            <Tip id="balances.statement" side="r" text="Upload the Citizens statement each month. A CSV fills in the bank lines; a PDF is kept on file and its lines are entered by hand.">
+            {st?.file_path ? <FileLink path={st.file_path} name={st.file_name || 'Statement'} /> : <span className="muted">None yet</span>}
+            {readOnly && !lines.length ? null : <Tip id="balances.statement" side="r" text="Upload the Citizens statement each month. A CSV fills in the bank lines; a PDF is kept on file and its lines are entered by hand.">
               <button className="btn sm" onClick={() => ui.open(<StatementModal month={month} />)}>{lines.length ? `Bank Lines · ${matched} of ${lines.length} Matched` : locked ? 'Bank Lines' : 'Upload Statement'}</button>
-            </Tip>
+            </Tip>}
           </span>
         </div>
         <div className="k">Bank Ending Balance, {sd(end)}</div>
         <div className="v">{locked ? cash(st?.ending_balance || 0)
+          : readOnly ? (st?.ending_balance != null ? cash(st.ending_balance) : <span className="muted">Not entered yet</span>)
           : <input className="in bal-in" inputMode="decimal" placeholder="$0.00" value={shown} onChange={(e) => setTyped({ month, v: e.target.value })} onBlur={saveEnding} />}</div>
         <div className="k">Sum Of Team Balances<Info tip={'Book balance on ' + date(end) + ': every fund, carry-over plus money in less money out, up to that day.'} /></div>
         <div className="v">{cash(rec.book)}</div>
@@ -140,7 +142,7 @@ export function ReconcilePanel({ month, setMonth }: { month: string; setMonth: (
               : <Hint r tip="Look for uncleared items, unassigned Zeffy gifts, or a deposit not yet logged"><Badge tone="red">{cash(rec.difference)} · Off</Badge></Hint>}</div>
       </div>
       {st?.unlock_reason && !locked ? <div className="muted" style={{ margin: '6px 0' }}>Unlocked {st.unlocked_at ? sd(st.unlocked_at.slice(0, 10)) : ''}{st.unlocked_by ? ' by ' + st.unlocked_by : ''}: {st.unlock_reason}</div> : null}
-      {locked ? (isTreasurer ? <div className="bal-acts"><button className="btn" onClick={unlock}>Unlock {mon(month)}</button></div> : null) : (
+      {readOnly ? null : locked ? (isTreasurer ? <div className="bal-acts"><button className="btn" onClick={unlock}>Unlock {mon(month)}</button></div> : null) : (
         <div className="bal-acts">
           <Hint r tip={ok ? '' : 'Enter the bank balance; the difference must be $0.00'}>
             <button className="btn pri" onClick={lock} disabled={!ok}>Mark {mon(month)} Reconciled</button>
@@ -285,7 +287,7 @@ function StatementModal({ month }: { month: string }) {
     </>}>
       <div className="k">Statement File</div>
       <div className="btnrow">
-        {st?.file_path ? <button type="button" className="doclink" onClick={() => openFile(st.file_path!)}>{st.file_name || 'Statement'}</button> : <span className="muted">None yet</span>}
+        {st?.file_path ? <FileLink path={st.file_path} name={st.file_name || 'Statement'} /> : <span className="muted">None yet</span>}
         {locked ? null : <>
           <input ref={file} className="bal-file" type="file" accept=".csv,.pdf,text/csv,application/pdf" onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); }} />
           <button className="btn sm" onClick={() => file.current?.click()} disabled={busy}>{busy ? 'Working…' : st?.file_path ? 'Upload Another (CSV Or PDF)' : 'Upload Statement (CSV Or PDF)'}</button>

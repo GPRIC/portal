@@ -8,7 +8,7 @@ import { BUCKET } from '@/lib/supabase/env';
 import { Calc } from '@/lib/calc';
 import { todayIso } from '@/lib/format';
 import { TABLES, type Db, type Role, type Settings, type TableName, type Totals } from '@/lib/types';
-import { useUI } from './ui';
+import { ReadOnlyProvider, useUI } from './ui';
 
 const NUMERIC: Partial<Record<TableName, string[]>> = {
   grants: ['ask', 'awarded', 'received', 'likelihood'], donations: ['amount', 'refunded'], ledger: ['amount'], team_requests: ['amount', 'returned'],
@@ -71,6 +71,10 @@ type DataCtx = {
   isTreasurer: boolean;
   /** Pays requests and closes them (Treasurer and bookkeeper). */
   canPay: boolean;
+  /** The CPA: reads the books, changes nothing (0012_cpa.sql refuses every write in the database too). */
+  readOnly: boolean;
+  /** Excel exports, of a list or the whole year: Treasurer, bookkeeper and CPA (P35). */
+  canExport: boolean;
 };
 const Ctx = createContext<DataCtx | null>(null);
 export function useData() {
@@ -111,17 +115,18 @@ export function DataProvider({ user, children }: { user: User; children: ReactNo
     const meta = (user.user_metadata || {}) as { full_name?: string; name?: string };
     const me = meta.full_name || meta.name || db.board_members.find((m) => m.email && m.email.toLowerCase() === (user.email || '').toLowerCase())?.name || user.email || 'Board';
     const role = db.role;
-    return { db, calc, user, reload, run, anySample, me, role, isTreasurer: role === 'treasurer', canPay: role === 'treasurer' || role === 'bookkeeper' };
+    return { db, calc, user, reload, run, anySample, me, role, isTreasurer: role === 'treasurer', canPay: role === 'treasurer' || role === 'bookkeeper',
+      readOnly: role === 'cpa', canExport: role === 'treasurer' || role === 'bookkeeper' || role === 'cpa' };
   }, [db, today, user, reload, run]);
 
   if (err && !db) return <div className="wrap"><div className="panel empty">Could not load the portal data. {err}<div style={{ marginTop: 10 }}><button className="btn" onClick={reload}>Try Again</button></div></div></div>;
   if (!value) return <div className="loading">Loading…</div>;
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={value}><ReadOnlyProvider value={value.readOnly}>{children}</ReadOnlyProvider></Ctx.Provider>;
 }
 
 function friendly(m: string) {
   if (/foreign key/i.test(m)) return 'Other records still use this one. Change or archive them first.';
-  if (/^Blocked:|not allowed for your role|Only the Treasurer|locked|archived, never deleted|status changes only/i.test(m)) return m;
+  if (/^Blocked:|not allowed for your role|Only the Treasurer|locked|archived, never deleted|status changes only|read only/i.test(m)) return m;
   if (/row-level security|permission denied|42501/i.test(m)) return 'Not allowed. Sign in again with your two-step code.';
   return m;
 }

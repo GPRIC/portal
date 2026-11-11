@@ -24,7 +24,7 @@ function plain(v: unknown): unknown {
 }
 
 export function ZeffyPanel() {
-  const { db, calc, run, reload } = useData();
+  const { db, calc, run, reload, readOnly } = useData();
   const ui = useUI();
   const file = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<'' | 'sync' | 'file'>('');
@@ -103,14 +103,14 @@ export function ZeffyPanel() {
         <div className="k">In Transit</div>
         <div className="v"><Hint r tip={transit.length ? `Gifts counted in balances but not yet paid out by Zeffy to the bank${biggest ? ', led by the ' + cash(biggest.amount) + ' ' + (calc.donor(biggest.donor_id)?.name || '') + ' gift' : ''}.` : 'Every Zeffy gift has been paid out to the bank.'}>{cash(transitTotal)}</Hint></div>
       </div>
-      <div className="bal-acts">
+      {readOnly ? null : <div className="bal-acts">
         <input ref={file} className="bal-file" type="file" accept=".xlsx" onChange={(e) => { const f = e.target.files?.[0]; if (f) importFile(f); }} />
         <Hint r tip="Zeffy > Payments > Export, All payments (.xlsx). Gifts already in the portal are only refreshed, never doubled.">
           <button className="btn sm" onClick={() => file.current?.click()} disabled={!!busy}>{busy === 'file' ? 'Importing…' : 'Import Zeffy File'}</button>
         </Hint>
         {/* Sync Now returns when the Zeffy API connection is built (ZEFFY_API_KEY); until then the file import is the way in. */}
         {process.env.NEXT_PUBLIC_ZEFFY_API === 'on' ? <button className="btn sm" onClick={syncNow} disabled={!!busy}>{busy === 'sync' ? 'Syncing…' : 'Sync Now'}</button> : null}
-      </div>
+      </div>}
     </div>
   );
 }

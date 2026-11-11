@@ -1,13 +1,15 @@
 'use client';
 import { Page } from '@/components/shell';
 import { useData } from '@/components/data';
-import { Attn, Card, Lines, type AttnItem } from '@/components/ui';
+import { Attn, Card, Lines, useUI, type AttnItem } from '@/components/ui';
+import { YearExportModal } from '@/components/export';
 import { Calc } from '@/lib/calc';
 import { daysBetween, money, monthName, sd } from '@/lib/format';
 import { unclearedOld, unmatchedLines } from '@/lib/bank';
 
 export default function Dashboard() {
-  const { db, calc } = useData();
+  const { db, calc, canExport } = useData();
+  const ui = useUI();
   const T = calc.today, c = calc.cash(), g = calc.grants(), src = calc.inBySource(), out = calc.outByCategory();
   const reqs = db.team_requests;
   const team = (id: string | null) => calc.team(id)?.short || id || 'GPRIC';
@@ -40,7 +42,7 @@ export default function Dashboard() {
   const waiting = reqs.filter((r) => calc.needsVote(r));
   const overdue = reqs.filter((r) => calc.isOverdue(r));
   return (
-    <Page title="Board Dashboard" help="dashboard">
+    <Page title="Board Dashboard" help="dashboard" tools={canExport ? <button className="btn" onClick={() => ui.open(<YearExportModal />)} title="One workbook for a whole year: ledger, donations, requests, bank months and fund balances">Year Export</button> : null}>
       <div className="panel">
         <div className="ph"><h2>Needs Attention</h2></div>
         <Attn items={items} />

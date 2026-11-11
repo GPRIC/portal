@@ -88,7 +88,7 @@ export function ExportModal() {
   };
 
   return (
-    <Modal title="Quarterly Export" wide foot={<><button className="btn" onClick={ui.close}>Cancel</button><button className="btn pri" onClick={go} disabled={busy}>{busy ? 'Building…' : 'Export'}</button></>}>
+    <Modal view title="Quarterly Export" wide foot={<><button className="btn" onClick={ui.close}>Cancel</button><button className="btn pri" onClick={go} disabled={busy}>{busy ? 'Building…' : 'Export'}</button></>}>
       <Kv k="Quarter"><Seg value={pick} onChange={setPick} options={qs.map((x, i) => [`${x.year}-${x.q}`, i === 0 && x.end >= calc.today ? `Q${x.q} ${x.year} · To Date` : x.label] as [string, string])} /></Kv>
       <Kv k="Format">Excel (.xlsx)</Kv>
       <Kv k="Includes">Team Balances at the quarter end, then one sheet per table: ledger, donations, donors, grants, team requests, receipts, approvals, bank statements, bank lines, teams and funds.</Kv>

@@ -286,7 +286,7 @@ export function ReceiptView({ start, rows, actions }: { start: RcRow; rows: RcRo
   </>;
 
   return (
-    <Modal wide title={row.missing ? 'Missing Receipt · ' + row.vendor : 'Receipt · ' + row.vendor} foot={foot}>
+    <Modal wide view title={row.missing ? 'Missing Receipt · ' + row.vendor : 'Receipt · ' + row.vendor} foot={foot}>
       <div className="full rc-split">
         {left}
         <div className="rc-kv">

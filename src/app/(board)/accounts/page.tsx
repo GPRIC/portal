@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { Page } from '@/components/shell';
+import { ListExport } from '@/components/export';
 import { rpc, useData } from '@/components/data';
 import { Amount, Area, DateIn, Err, Foot, num, orNull, str, Txt } from '@/components/forms';
 import { Badge, Card, Kv, Lines, Modal, Pills, Seg, Table, useUI, type Col, type Tone } from '@/components/ui';
@@ -27,15 +28,16 @@ export default function AccountsPage() {
     { k: 'service', label: 'Service' },
     { k: 'purpose', label: 'Used For' },
     { k: 'owner_email', label: 'Owner Email' },
-    { k: 'admins', label: 'Admins', sv: (a) => a.admins.length, html: (a) => (a.admins.length < 2 ? <Badge tone="amb">{(a.admins[0] || 'No') + ' Only'}</Badge> : a.admins.join(', ')) },
+    { k: 'admins', label: 'Admins', sv: (a) => a.admins.length, xv: (a) => a.admins, html: (a) => (a.admins.length < 2 ? <Badge tone="amb">{(a.admins[0] || 'No') + ' Only'}</Badge> : a.admins.join(', ')) },
     { k: 'plan', label: 'Plan' },
-    { k: 'cost', label: 'Cost', num: true, sv: monthly, html: (a) => (a.cost ? money(a.cost) + '/' + (a.period === 'Month' ? 'mo' : 'yr') : 'Free') },
-    { k: 'renewal', label: 'Renews', sv: (a) => a.renewal || '9999', html: (a) => (a.renewal ? (soon(a) ? <Badge tone="amb">{sd(a.renewal)}</Badge> : date(a.renewal)) : '') },
+    { k: 'cost', label: 'Cost', num: true, sv: monthly, xv: (a) => (a.cost ? a.cost + '/' + (a.period === 'Month' ? 'mo' : 'yr') : 'Free'), html: (a) => (a.cost ? money(a.cost) + '/' + (a.period === 'Month' ? 'mo' : 'yr') : 'Free') },
+    { k: 'renewal', label: 'Renews', sv: (a) => a.renewal || '9999', xv: (a) => a.renewal, html: (a) => (a.renewal ? (soon(a) ? <Badge tone="amb">{sd(a.renewal)}</Badge> : date(a.renewal)) : '') },
     { k: 'payment_method', label: 'Paid With' },
     { k: 'discount', label: 'Nonprofit Discount' },
   ];
+  const shown = all.filter((P.find((p) => p[0] === filt) || P[0])[2]);
   return (
-    <Page title="Accounts And Subscriptions" help="accounts" actions={<button className="btn pri" onClick={() => ui.open(<AccountForm />)}>Add Account</button>}>
+    <Page title="Accounts And Subscriptions" help="accounts" tools={<ListExport name="Accounts" cols={cols} rows={shown} />} actions={<button className="btn pri" onClick={() => ui.open(<AccountForm />)}>Add Account</button>}>
       <div className="cards">
         <Card n="Accounts" v={String(all.length)} tip={all.filter((a) => a.cost).length + ' paid · ' + all.filter((a) => !a.cost).length + ' free'} />
         <Card n="Monthly Cost" v={money(round2(m), true)} tip={'Yearly ' + money(round2(m * 12), true) + '. Yearly plans spread over 12 months.'} />
@@ -44,7 +46,7 @@ export default function AccountsPage() {
       </div>
       <div className="panel">
         <Pills items={P.map(([k, tone, f]) => ({ key: k, label: k, tone, count: all.filter(f).length }))} active={filt} onPick={setFilt} />
-        <Table cols={cols} rows={all.filter((P.find((p) => p[0] === filt) || P[0])[2])} sort="renewal" onRow={(a) => ui.open(<AccountForm id={a.id} />)} />
+        <Table cols={cols} rows={shown} sort="renewal" onRow={(a) => ui.open(<AccountForm id={a.id} />)} />
       </div>
     </Page>
   );
