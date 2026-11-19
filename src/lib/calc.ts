@@ -169,8 +169,10 @@ export class Calc {
       balance: t?.balance ?? 0 };
   }
   /** One row per team fund, then the unrestricted funds. */
+  /** Every fund with money or any activity; a fund that has never had an entry or a gift is left out. */
   teamBalances(): MoneyRow[] {
-    const rows = this.db.funds.map((f) => this.fundMoney(f));
+    const used = new Set([...this.db.ledger.map((l) => l.fund_id), ...this.db.donations.map((d) => d.fund_id)]);
+    const rows = this.db.funds.map((f) => this.fundMoney(f)).filter((r) => r.balance !== 0 || used.has(r.fund.id));
     return [...rows.filter((r) => r.team), ...rows.filter((r) => !r.team)];
   }
   /** Zeffy gifts with no Fund in Zeffy (sitting in the general fund until the board assigns them). */
