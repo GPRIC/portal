@@ -25,3 +25,13 @@
 .bal-tx { max-height: 440px; overflow-y: auto; }
 .bal-in { width: 150px; text-align: right; }
 .bal-file { display: none; }
+/* Statement Intake: its own column in the right page margin when the window is wide enough, else a header button */
+.intake-anchor { position: relative; height: 0; }
+.intake { position: absolute; left: calc(100% + 36px); top: -48px; width: 280px; display: none; }
+.intake .ph { display: flex; align-items: center; gap: 6px; }
+.intake-drop { margin: 12px; border: 1.5px dashed var(--bst); border-radius: 8px; min-height: 260px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 20px 12px; text-align: center; color: var(--t3); cursor: pointer; }
+.intake-drop b { color: var(--t2); font-weight: 600; line-height: 1.4; }
+.intake-drop span { font-size: 12px; }
+.intake-drop.over { border-color: var(--g); background: rgba(var(--g-rgb), .06); color: var(--t); }
+.intake-btn { display: inline-flex; align-items: center; gap: 6px; }
+@media (min-width: 1860px) { .intake { display: block; } .intake-btn { display: none; } }

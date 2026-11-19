@@ -6,7 +6,7 @@ import { useData } from '@/components/data';
 import { Badge, Modal, useUI } from '@/components/ui';
 import { Tip } from '@/components/tips';
 import { supabase } from '@/lib/supabase/client';
-import { zeffyRowsFromSheet } from '@/lib/zeffy';
+import { zeffyRowsFromSheet, type ZeffyRow } from '@/lib/zeffy';
 import { sd, sum } from '@/lib/format';
 import type { Donation } from '@/lib/types';
 import { cash, Hint } from './hint';
@@ -21,6 +21,21 @@ function plain(v: unknown): unknown {
   if ('result' in o) return plain(o.result);
   if (o.text != null) return plain(o.text);
   return null;
+}
+
+/** The gifts in a Zeffy All Payments export (.xlsx), read in the browser. Throws when there are none. */
+export async function readZeffyFile(f: File | ArrayBuffer): Promise<ZeffyRow[]> {
+  const m = await import('exceljs');
+  const Workbook = m.Workbook ?? (m as unknown as { default: typeof m }).default.Workbook;
+  const wb = new Workbook();
+  await wb.xlsx.load(f instanceof ArrayBuffer ? f : await f.arrayBuffer());
+  const ws = wb.worksheets[0];
+  if (!ws) throw new Error('The file has no sheets.');
+  const table: unknown[][] = [];
+  ws.eachRow({ includeEmpty: false }, (row) => { table.push((row.values as unknown[]).slice(1).map(plain)); });
+  const rows = zeffyRowsFromSheet(table);
+  if (!rows.length) throw new Error('No gifts found in this file.');
+  return rows;
 }
 
 export function ZeffyPanel() {
@@ -53,19 +68,7 @@ export function ZeffyPanel() {
   const importFile = async (f: File) => {
     setBusy('file');
     try {
-      const m = await import('exceljs');
-      const Workbook = m.Workbook ?? (m as unknown as { default: typeof m }).default.Workbook;
-      const wb = new Workbook();
-      await wb.xlsx.load(await f.arrayBuffer());
-      const ws = wb.worksheets[0];
-      if (!ws) throw new Error('The file has no sheets.');
-      const table: unknown[][] = [];
-      ws.eachRow({ includeEmpty: false }, (row) => {
-        const vals = (row.values as unknown[]).slice(1).map(plain);
-        table.push(vals);
-      });
-      const rows = zeffyRowsFromSheet(table);
-      if (!rows.length) throw new Error('No gifts found in this file.');
+      const rows = await readZeffyFile(f);
       const res = await run(() => supabase().rpc('zeffy_upsert', { p_rows: rows, p_source: 'file' }));
       if (res) {
         const r = res as { inserted: number; updated: number; skipped: number };

@@ -23,7 +23,7 @@ export function defaultMonth(statements: BankStatement[], today: string): string
   return open[0] || last;
 }
 
-async function ensureStatement(month: string, existing: BankStatement | undefined): Promise<{ id: string } | { error: string }> {
+export async function ensureStatement(month: string, existing: BankStatement | undefined): Promise<{ id: string } | { error: string }> {
   if (existing) return { id: existing.id };
   const { data, error } = await rpc('bank_statement_add', { p_month: month });
   if (error || !data) return { error: error?.message || 'Could not create the statement' };
@@ -160,7 +160,7 @@ function ledgerLabel(l: Ledger, party: string) {
   return `${sd(l.date)} · ${party || l.source || l.category || 'Entry'}${l.memo ? ' · ' + l.memo : ''} · ${cash(l.dir === 'in' ? l.amount : -l.amount)}`;
 }
 
-function StatementModal({ month }: { month: string }) {
+export function StatementModal({ month }: { month: string }) {
   const { db, calc, run } = useData();
   const ui = useUI();
   const file = useRef<HTMLInputElement>(null);

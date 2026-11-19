@@ -11,6 +11,7 @@ import { duplicateIds, TeamModal } from '@/components/balances/team-modal';
 import { ZeffyPanel } from '@/components/balances/zeffy';
 import { defaultMonth, ReconcilePanel } from '@/components/balances/reconcile';
 import { ExportModal } from '@/components/balances/export';
+import { IntakeButton, IntakePanel } from '@/components/balances/intake';
 import { ListExport, YearExportModal } from '@/components/export';
 import type { MoneyRow } from '@/lib/calc';
 import { round2, sum } from '@/lib/format';
@@ -49,6 +50,7 @@ export default function BalancesPage() {
 
   return (
     <Page title="Team Balances" help="balances" tools={<>
+      <IntakeButton />
       {canExport ? <>
         <ListExport name="Team Balances" cols={cols} rows={rows} />
         <button className="btn" onClick={() => ui.open(<YearExportModal />)} title="One workbook for a whole year: ledger, donations, requests, bank months and fund balances">Year Export</button>
@@ -65,6 +67,7 @@ export default function BalancesPage() {
       </Tip>
       </> : null}
     </>}>
+      <IntakePanel />
       <div className="panel bal-table">
         <Table cols={cols} rows={rows} sort="balance" dir={-1} onRow={(r) => ui.open(<TeamModal fundId={r.fund.id} />)} empty="No funds yet."
           foot={<tr>
