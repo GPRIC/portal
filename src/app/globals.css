@@ -174,7 +174,6 @@ textarea.in { min-height: 70px; resize: vertical; }
 .authbrand { display: flex; align-items: center; gap: 6px; font-weight: 700; margin-bottom: 14px; }
 .authbrand .dotb { width: 10px; height: 10px; border-radius: 3px; background: var(--g); }
 
-.sample-flag { position: fixed; right: 16px; bottom: 16px; padding: 4px 12px; border-radius: 999px; background: var(--amb); color: var(--on-amb); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; z-index: 30; box-shadow: 0 2px 8px rgba(0, 0, 0, .3); border: none; cursor: pointer; }
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--raised); border: 1px solid rgba(var(--g-rgb), .4); color: var(--g); padding: 8px 14px; border-radius: 999px; z-index: 60; font-size: 12px; white-space: nowrap; box-shadow: var(--shadow); }
 .toast.bad { color: var(--red); border-color: rgba(var(--red-rgb), .4); }
 .loading { padding: 40px; text-align: center; color: var(--t3); }

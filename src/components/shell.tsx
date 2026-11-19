@@ -1,6 +1,7 @@
 'use client';
 // The board shell: top bar with the nine pages, who is signed in, light/dark switch, sign out,
-// the page header with About This Page, and the Sample Data flag with its Clear button.
+// and the page header with About This Page. (The Sample Data flag and its Clear button were removed
+// 2026-11-19: the sample-flagged rows are real workbook entries, replaced by the P23 bank rebuild, never cleared in one click.)
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
@@ -37,7 +38,6 @@ export function BoardApp({ user, children }: { user: User; children: ReactNode }
         <TipsProvider userId={user.id}>
           <TopBar />
           {children}
-          <SampleFlag />
           <UIHost />
         </TipsProvider>
       </DataProvider>
@@ -136,18 +136,3 @@ export function Page({ title, help, actions, tools, children }: { title: string;
   );
 }
 
-function SampleFlag() {
-  const { anySample, run, isTreasurer } = useData();
-  const ui = useUI();
-  if (!anySample || !isTreasurer) return null;
-  const clear = async () => {
-    const ok = await ui.confirm({
-      title: 'Clear Sample Data',
-      body: <>This removes every made-up row the portal started with: the sample donors, gifts, grants, ledger entries, team requests, meetings, documents and accounts. Anything you entered yourself stays. Sample funds, teams or donors that your own entries use are kept and become real. This cannot be undone.</>,
-      ok: 'Clear Sample Data', danger: true,
-    });
-    if (!ok) return;
-    await run(() => supabase().rpc('clear_sample_data'), 'Sample data cleared');  // Treasurer only (the database checks too)
-  };
-  return <button className="sample-flag" onClick={clear} title="Some names and figures here are made up to show how the portal works. Click to clear them.">Sample data · Clear</button>;
-}

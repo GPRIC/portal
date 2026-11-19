@@ -70,7 +70,6 @@ type DataCtx = {
   db: Db; calc: Calc; user: User; reload: () => Promise<void>;
   /** Runs a write, shows the error if it fails, reloads the data, and returns whether it worked. */
   run: <T>(fn: () => PromiseLike<{ data?: T; error: { message: string } | null }>, ok?: string) => Promise<T | undefined | false>;
-  anySample: boolean;
   /** Who is signed in, as a short name for "added by" fields. */
   me: string;
   role: Role | null;
@@ -118,11 +117,10 @@ export function DataProvider({ user, children }: { user: User; children: ReactNo
   const value = useMemo(() => {
     if (!db) return null;
     const calc = new Calc(db, today);
-    const anySample = TABLES.some((t) => (db[t] as { sample: boolean }[]).some((r) => r.sample));
     const meta = (user.user_metadata || {}) as { full_name?: string; name?: string };
     const me = meta.full_name || meta.name || db.board_members.find((m) => m.email && m.email.toLowerCase() === (user.email || '').toLowerCase())?.name || user.email || 'Board';
     const role = db.role;
-    return { db, calc, user, reload, run, anySample, me, role, isTreasurer: role === 'treasurer', canPay: role === 'treasurer' || role === 'bookkeeper',
+    return { db, calc, user, reload, run, me, role, isTreasurer: role === 'treasurer', canPay: role === 'treasurer' || role === 'bookkeeper',
       readOnly: role === 'cpa', canExport: role === 'treasurer' || role === 'bookkeeper' || role === 'cpa' };
   }, [db, today, user, reload, run]);
 
