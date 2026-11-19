@@ -10,6 +10,7 @@
 import type { NextRequest } from 'next/server';
 import { adminSupabase } from '@/lib/supabase/admin';
 import { emailConfigured, send } from '@/lib/email';
+import { pushPending } from '@/lib/push';
 import { sameSecret } from '../../zeffy/zeffy-api';
 
 export const maxDuration = 60;
@@ -21,7 +22,14 @@ function siteOrigin(request: NextRequest): string {
   return prod ? 'https://' + prod : new URL(request.url).origin;
 }
 
+// Phone alerts (src/lib/push.ts) go out first and do not depend on email being set up.
 async function flush(request: NextRequest, counted: boolean) {
+  const admin = adminSupabase();
+  const push = admin ? await pushPending(admin, siteOrigin(request)).catch((e) => { console.error('push failed', e); return { configured: true, sent: 0 }; }) : { configured: false, sent: 0 };
+  return { ...(await flushEmail(request, counted)), push };
+}
+
+async function flushEmail(request: NextRequest, counted: boolean) {
   if (!emailConfigured()) return { configured: false, sent: 0, failed: 0 };
   const admin = adminSupabase();
   if (!admin) return { configured: false, sent: 0, failed: 0 };

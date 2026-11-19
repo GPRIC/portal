@@ -10,6 +10,7 @@ import { date, initials, money, round2, sd, sum } from '@/lib/format';
 import { DIRECT_PAY, PAY_METHODS, PAY_TO, REQUEST_CATEGORIES, REQUEST_TYPES, type PayMethod, type RequestType, type Team, type TeamRequest } from '@/lib/types';
 import type { Calc } from '@/lib/calc';
 import { flushAlerts } from '@/lib/alerts';
+import { PhoneAlerts } from '@/components/phone-alerts';
 import './requests.css';
 
 /** How a team's money reaches it (the team record, not a request). */
@@ -145,7 +146,7 @@ export default function RequestsPage() {
     { k: 'status', label: 'Status' }, { k: 'filer', label: 'Filed By', xv: (r) => requestor(r) }, { k: 'paid_date', label: 'Paid' },
   ];
   return (
-    <Page title="Requests" help="requests" tools={<ListExport name="Requests" cols={xcols} rows={rows} />} actions={<>
+    <Page title="Requests" help="requests" tools={<><PhoneAlerts /><ListExport name="Requests" cols={xcols} rows={rows} /></>} actions={<>
       <Tip id="requests.rules" side="r" text="Approval Rules: set the dollar threshold and how many board approvals each side of it needs.">
         <button className="ib" title="Approval Rules" aria-label="Approval Rules" onClick={() => ui.open(<RulesForm />)}>{GEAR}</button>
       </Tip>

@@ -193,5 +193,27 @@ const cl = (await as(B1, `select public.clear_sample_data() c`)).rows[0].c;
 ok(cl.ledger > 0, 'clear sample data runs ' + JSON.stringify(cl));
 ok((await db.query(`select count(*)::int n from public.change_log where action = 'Deleted' and user_id = $1`, [BOARD1])).rows[0].n > 0, 'deletes (sample clear) are logged with the person');
 
+// Phone alerts (0016): only people on the alert list sign a phone up; each reimbursement pushes once.
+const EP = 'https://push.example.org/sub/1';
+await fails(B2, `select public.push_subscribe($1, 'k', 'a', 'iPhone')`, [EP], /alert list/, 'phone alerts refused off the alert list');
+await fails(C, `select public.push_subscribe($1, 'k', 'a', 'iPhone')`, [EP], /alert list/, 'a team login cannot sign a phone up');
+await db.exec(`update public.portal_access set email_alerts = true where user_id = '${BOARD1}'`);
+await as(B1, `select public.push_subscribe($1, 'k', 'a', 'iPhone')`, [EP]);
+ok((await as(B1, `select count(*)::int n from public.push_subscriptions`)).rows[0].n === 1, 'alert-list member signs a phone up and sees it');
+ok((await as(B2, `select count(*)::int n from public.push_subscriptions`)).rows[0].n === 0, 'nobody else sees that phone');
+await fails(B1, `select * from public.push_claim()`, [], /permission denied/, 'a signed-in person cannot run the push sender');
+await db.exec(`insert into public.email_outbox (kind, request_id, subject, body_text, to_emails)
+  select 'team_request', r.id, 'New team request: Test · $1.00 · x', 'b', array['a@b.c'] from public.team_requests r
+   where r.type = 'Reimbursement' and not r.sample and r.id not in (select request_id from public.email_outbox where request_id is not null) limit 1`);
+const pc = await db.transaction(async (tx) => { await tx.exec('set local role service_role'); return tx.query(`select * from public.push_claim()`); });
+const pc2 = await db.transaction(async (tx) => { await tx.exec('set local role service_role'); return tx.query(`select * from public.push_claim()`); });
+ok(pc2.rows.length === 0 && pc.rows.every((r) => !/^New team request/.test(r.body)), 'each reimbursement alert is claimed once ' + pc.rows.length);
+const pt = await db.transaction(async (tx) => { await tx.exec('set local role service_role'); return tx.query(`select * from public.push_targets(null)`); });
+ok(pt.rows.length === 1, 'the phone is a push target');
+await as(B1, `select public.push_unsubscribe($1)`, [EP]);
+const pt2 = await db.transaction(async (tx) => { await tx.exec('set local role service_role'); return tx.query(`select * from public.push_targets(null)`); });
+ok(pt2.rows.length === 0, 'turning phone alerts off stops the pushes');
+await db.exec(`update public.portal_access set email_alerts = false where user_id = '${BOARD1}'`);
+
 console.log(failed ? `\n${failed} check(s) failed` : '\nAll checks passed');
 process.exit(failed ? 1 : 0);
