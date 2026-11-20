@@ -6,8 +6,9 @@ import type { MoneyKind } from '@/lib/calc';
 import type { Ledger } from '@/lib/types';
 import { sd } from '@/lib/format';
 import { Cash, cash, download } from './hint';
+import { TransferModal } from './transfer';
 
-export const KTONE: Record<MoneyKind, Tone> = { Zeffy: 'grn', Deposit: 'blu', Reimbursement: 'vio', 'Direct Expense': 'gry', 'Carry-Over': 'gry' };
+export const KTONE: Record<MoneyKind, Tone> = { Zeffy: 'grn', Deposit: 'blu', Reimbursement: 'vio', 'Direct Expense': 'gry', 'Carry-Over': 'gry', Transfer: 'amb' };
 
 /** Ledger rows that repeat another row exactly (same date, party, amount and memo): likely entered twice. */
 export function duplicateIds(rows: Ledger[]): Set<string> {
@@ -22,7 +23,7 @@ export function duplicateIds(rows: Ledger[]): Set<string> {
 }
 
 export function TeamModal({ fundId }: { fundId: string }) {
-  const { db, calc } = useData();
+  const { db, calc, canPay, readOnly } = useData();
   const ui = useUI();
   const f = calc.fund(fundId);
   if (!f) return <Modal title="Team"><div className="full muted">This fund no longer exists.</div></Modal>;
@@ -55,9 +56,11 @@ export function TeamModal({ fundId }: { fundId: string }) {
     download(name.replace(/[^\w\- ]+/g, '').trim() + ' transactions.csv', lines.join('\r\n'), 'text/csv');
   };
 
-  const inn = m.carry + m.zeffy + m.deposits, out = m.reimbursements + m.direct;
+  // transfers count on each side: money that came from another team is in, money sent to one is out
+  const xfer = (d: 'in' | 'out') => rows.filter((l) => l.transfer_id && l.dir === d).reduce((a, l) => a + l.amount, 0);
+  const inn = m.carry + m.zeffy + m.deposits + xfer('in'), out = m.reimbursements + m.direct + xfer('out');
   return (
-    <Modal view title={name} wide foot={<><button className="btn" onClick={ui.close}>Close</button><button className="btn" onClick={csv} disabled={!rows.length}>Export CSV</button></>}>
+    <Modal view title={name} wide foot={<><button className="btn" onClick={ui.close}>Close</button><span className="btnrow">{canPay && !readOnly ? <button className="btn" onClick={() => ui.open(<TransferModal from={fundId} />)}>Transfer Money</button> : null}<button className="btn" onClick={csv} disabled={!rows.length}>Export CSV</button></span></>}>
       <div className="full bal-sum">
         <span className="muted">Balance <b>{m.balance < 0 ? <span className="neg">{cash(m.balance)}</span> : <Cash n={m.balance} />}</b></span>
         <span className="muted">In {cash(inn)}</span>

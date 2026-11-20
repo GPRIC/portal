@@ -8,7 +8,7 @@ import { Badge, Card, Kv, Modal, St, Steps, Table, useUI, type Col } from '@/com
 import { Tip } from '@/components/tips';
 import { supabase } from '@/lib/supabase/client';
 import { addDays, daysBetween, money, sd, sum } from '@/lib/format';
-import { friendly, useTeam, type Gift, type Portal, type TeamReceipt, type TeamReq } from './team-data';
+import { friendly, useTeam, type Gift, type Portal, type TeamReceipt, type TeamReq, type TeamTransfer } from './team-data';
 import { approvalRule, NewRequest, RECEIPT_RULE, RequestForm, TypeBadge } from './team-forms';
 
 const ICON: Record<'eye' | 'rcpt' | 'redo', ReactNode> = {
@@ -82,6 +82,13 @@ export function TeamHome() {
       : <Badge tone="grn">Received</Badge>) },
   ];
 
+  const xferCols: Col<TeamTransfer>[] = [
+    { k: 'date', label: 'Date', html: (x) => sd(x.date) },
+    { k: 'team', label: 'From Or To', sv: (x) => x.team, html: (x) => (x.dir === 'in' ? 'From ' : 'To ') + x.team },
+    { k: 'reason', label: 'Reason' },
+    { k: 'amount', label: 'Amount', num: true, sv: (x) => (x.dir === 'in' ? x.amount : -x.amount), html: (x) => <span style={{ color: x.dir === 'in' ? 'var(--g)' : undefined }}>{x.dir === 'in' ? '+' : '-'}{money(x.amount, true)}</span> },
+  ];
+
   const newBtn = blocked
     ? <span className="dis" title={'New requests are paused until receipts for ' + (late[0] ? late[0].id : 'your overdue pre-approvals') + ' are in.'}><button className="btn pri" disabled>New Request</button></span>
     : <button className="btn pri" onClick={() => ui.open(<NewRequest />)}>New Request</button>;
@@ -109,7 +116,7 @@ export function TeamHome() {
       <div className="cards">
         <Tip id="team.balance" text="What your team can spend right now. Hover any tile for the detail.">
           <Card n="Available Balance" v={money(m.balance, true)} tip={<>
-            {ln('Carry-Over', m.carry)}{ln('Zeffy Gifts', m.zeffy)}{ln('Deposits', m.deposits)}{ln('Reimbursements', -m.reimbursements)}{ln('Direct Expenses', -m.direct)}
+            {ln('Carry-Over', m.carry)}{ln('Zeffy Gifts', m.zeffy)}{ln('Deposits', m.deposits)}{ln('Reimbursements', -m.reimbursements)}{ln('Direct Expenses', -m.direct)}{m.transfers ? ln('Transfers', m.transfers) : null}
           </>} />
         </Tip>
         <Card n="Waiting On Board" v={money(sum(waiting, (r) => r.amount), true)} color={waiting.length ? 'blue' : undefined} tip={<>
@@ -136,6 +143,15 @@ export function TeamHome() {
           <Table cols={giftCols} rows={p.gifts} sort="date" dir={-1} empty="No gifts yet." />
         </div>
       </div>
+      {p.transfers.length ? (
+        <div className="panel">
+          <div className="ph">
+            <h2>Transfers</h2><span className="sp" />
+            <span className="muted" title="Money the board moved between your team and another team, with the reason.">Between Teams</span>
+          </div>
+          <Table cols={xferCols} rows={p.transfers} sort="date" dir={-1} />
+        </div>
+      ) : null}
     </Page>
   );
 }

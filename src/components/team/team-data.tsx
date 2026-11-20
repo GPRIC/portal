@@ -27,17 +27,20 @@ export type TeamDirect = {
   status: string; paid_date: string | null; pay_method: string | null; requestor_name: string | null;
 } & Extra;
 export type Gift = { id: string; date: string; amount: number; donor: string; in_transit: boolean };
+/** Money moved between this team and another (0017): in came to the team, out went from it, always with the reason. */
+export type TeamTransfer = { id: string; date: string; amount: number; dir: 'in' | 'out'; team: string; reason: string };
 export type Portal = {
   team: { id: string; name: string; short: string; program: string | null; pay_mode: string | null; school: string | null };
   me: { name: string | null; email: string | null; role: string | null; zelle_contact: string | null };
   rules: { receipt_days: number; threshold: number; under: number; over: number };
-  money: { carry: number; zeffy: number; deposits: number; reimbursements: number; direct: number; balance: number };
+  money: { carry: number; zeffy: number; deposits: number; reimbursements: number; direct: number; transfers: number; balance: number };
   overdue: number;
   season_start: string | null;
   raised: number;
   requests: TeamReq[];
   direct: TeamDirect[];
   gifts: Gift[];
+  transfers: TeamTransfer[];
 };
 
 type Raw = Record<string, unknown>;
@@ -65,7 +68,7 @@ function normalize(raw: Raw): Portal {
     team: { id: String(t.id ?? ''), name: String(t.name ?? ''), short: String(t.short ?? t.name ?? ''), program: s(t.program), pay_mode: s(t.pay_mode), school: s(t.school) },
     me: { name: s(me.name), email: s(me.email), role: s(me.role), zelle_contact: s(me.zelle_contact) },
     rules: { receipt_days: n(r.receipt_days) || 60, threshold: n(r.threshold), under: n(r.under) || 1, over: n(r.over) || 2 },
-    money: { carry: n(m.carry), zeffy: n(m.zeffy), deposits: n(m.deposits), reimbursements: n(m.reimbursements), direct: n(m.direct), balance: n(m.balance) },
+    money: { carry: n(m.carry), zeffy: n(m.zeffy), deposits: n(m.deposits), reimbursements: n(m.reimbursements), direct: n(m.direct), transfers: n(m.transfers), balance: n(m.balance) },
     overdue: n(raw.overdue),
     season_start: s(raw.season_start),
     raised: n(raw.raised),
@@ -83,6 +86,7 @@ function normalize(raw: Raw): Portal {
       requestor_name: s(x.requestor_name), ...extra(x, String(x.id)),
     })),
     gifts: ((raw.gifts || []) as Raw[]).map((x) => ({ id: String(x.id), date: String(x.date ?? ''), amount: n(x.amount), donor: String(x.donor ?? ''), in_transit: x.in_transit === true })),
+    transfers: ((raw.transfers || []) as Raw[]).map((x) => ({ id: String(x.id), date: String(x.date ?? ''), amount: n(x.amount), dir: x.dir === 'out' ? 'out' as const : 'in' as const, team: String(x.team ?? ''), reason: String(x.reason ?? '') })),
   };
 }
 

@@ -12,6 +12,7 @@ import { ZeffyPanel } from '@/components/balances/zeffy';
 import { defaultMonth, ReconcilePanel } from '@/components/balances/reconcile';
 import { ExportModal } from '@/components/balances/export';
 import { IntakeButton, IntakePanel } from '@/components/balances/intake';
+import { TransferButton } from '@/components/balances/transfer';
 import { ListExport, YearExportModal } from '@/components/export';
 import type { MoneyRow } from '@/lib/calc';
 import { round2, sum } from '@/lib/format';
@@ -31,7 +32,7 @@ export default function BalancesPage() {
     ...r, id: r.fund.id, name: r.team?.name || r.fund.name,
     dup: duplicateIds(db.ledger.filter((l) => l.fund_id === r.fund.id)).size > 0,
   }));
-  const tot = (k: 'carry' | 'zeffy' | 'deposits' | 'reimbursements' | 'direct' | 'balance') => round2(sum(rows, (r) => r[k]));
+  const tot = (k: 'carry' | 'zeffy' | 'deposits' | 'reimbursements' | 'direct' | 'transfers' | 'balance') => round2(sum(rows, (r) => r[k]));
   const total = tot('balance');
 
   const cols: Col<Row>[] = [
@@ -43,6 +44,9 @@ export default function BalancesPage() {
     { k: 'deposits', label: 'Deposits', num: true, html: (r) => <Cash n={r.deposits} /> },
     { k: 'reimbursements', label: 'Reimbursements', num: true, html: (r) => <Cash n={r.reimbursements} out /> },
     { k: 'direct', label: 'Direct Expenses', num: true, html: (r) => <Cash n={r.direct} out /> },
+    { k: 'transfers', label: 'Transfers', num: true, html: (r) => (r.transfers
+      ? <span title="Money moved to or from other teams, net" style={{ color: r.transfers > 0 ? 'var(--g)' : undefined }}>{r.transfers > 0 ? '+' : ''}{cash(r.transfers)}</span>
+      : <Cash n={0} />) },
     { k: 'balance', label: 'Balance', num: true, html: (r) => (r.balance < 0
       ? <span className="neg" title="Spent more than it has; GPRIC General is covering the gap">{cash(r.balance)}</span>
       : <Cash n={r.balance} />) },
@@ -51,6 +55,7 @@ export default function BalancesPage() {
   return (
     <Page title="Team Balances" help="balances" tools={<>
       <IntakeButton />
+      <TransferButton />
       {canExport ? <>
         <ListExport name="Team Balances" cols={cols} rows={rows} />
         <button className="btn" onClick={() => ui.open(<YearExportModal />)} title="One workbook for a whole year: ledger, donations, requests, bank months and fund balances">Year Export</button>
@@ -73,7 +78,7 @@ export default function BalancesPage() {
           foot={<tr>
             <td>Total</td>
             <td className="num">{cash(tot('carry'))}</td><td className="num">{cash(tot('zeffy'))}</td><td className="num">{cash(tot('deposits'))}</td>
-            <td className="num">{cash(-tot('reimbursements'))}</td><td className="num">{cash(-tot('direct'))}</td><td className="num">{cash(total)}</td>
+            <td className="num">{cash(-tot('reimbursements'))}</td><td className="num">{cash(-tot('direct'))}</td><td className="num">{cash(tot('transfers'))}</td><td className="num">{cash(total)}</td>
           </tr>} />
         <div className="bal-lines">
           {pendingGrants.map((x) => (

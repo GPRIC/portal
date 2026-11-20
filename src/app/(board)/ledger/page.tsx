@@ -8,6 +8,7 @@ import { Amount, Area, DateIn, Err, FilePick, Foot, FundSelect, num, orNull, Sel
 import { Badge, Card, Check, Kv, Lines, Modal, Pills, Seg, Table, useUI, Warnings, type Col, type Tone } from '@/components/ui';
 import { date, money, sum } from '@/lib/format';
 import type { Ledger } from '@/lib/types';
+import { TransferEntry } from '@/components/balances/transfer';
 
 const CATEGORIES = ['Space', 'Equipment', 'Administration', 'Robotics Teams'] as const;
 const IN_SOURCES = ['Fundraising', 'Interest', 'Refund', 'Other', 'Opening Balance'] as const;
@@ -36,9 +37,9 @@ export default function LedgerPage() {
   const L = db.ledger;
   const restricted = (l: Ledger) => !!calc.fund(l.fund_id)?.restricted;
   const P: [string, Tone, (l: Ledger) => boolean][] = [
-    ['All', 'gry', () => true], ['Money In', 'grn', (l) => l.dir === 'in' && l.source !== 'Opening Balance'], ['Money Out', 'red', (l) => l.dir === 'out'],
+    ['All', 'gry', () => true], ['Money In', 'grn', (l) => l.dir === 'in' && l.source !== 'Opening Balance' && !l.transfer_id], ['Money Out', 'red', (l) => l.dir === 'out' && !l.transfer_id],
     ['Restricted', 'amb', restricted], ['Unrestricted', 'gry', (l) => !restricted(l)], ['Missing Receipt', 'amb', (l) => l.dir === 'out' && !l.receipt && !l.reverses_id && !l.reversed_by_id],
-    ['Reversed', 'vio', (l) => !!l.reverses_id || !!l.reversed_by_id],
+    ['Reversed', 'vio', (l) => !!l.reverses_id || !!l.reversed_by_id], ['Transfers', 'amb', (l) => !!l.transfer_id],
   ];
   const pills = P.map(([k, tone, f]) => ({ key: k, label: k, tone, count: L.filter(f).length }));
   if (filt.startsWith('F:')) pills.push({ key: filt, label: fundName(filt.slice(2)), tone: 'blu', count: L.filter((l) => l.fund_id === filt.slice(2)).length });
@@ -46,7 +47,7 @@ export default function LedgerPage() {
 
   const cols: Col<Ledger>[] = [
     { k: 'date', label: 'Date', html: (l) => date(l.date) },
-    { k: 'memo', label: 'Description', html: (l) => <>{l.memo}{l.reverses_id ? <> <Badge tone="vio">Reversal</Badge></> : l.reversed_by_id ? <> <Badge tone="gry">Reversed</Badge></> : null}</> },
+    { k: 'memo', label: 'Description', html: (l) => <>{l.memo}{l.transfer_id ? <> <Badge tone="amb">Transfer</Badge></> : l.reverses_id ? <> <Badge tone="vio">Reversal</Badge></> : l.reversed_by_id ? <> <Badge tone="gry">Reversed</Badge></> : null}</> },
     { k: 'party', label: 'From / To', sv: party, html: party },
     { k: 'fund_id', label: 'Fund', sv: (l) => fundName(l.fund_id), html: (l) => fundName(l.fund_id) },
     { k: 'kind', label: 'Source / Category', sv: (l) => l.source || l.category, html: (l) => l.source || l.category },
@@ -99,6 +100,7 @@ function EntryForm({ id, dir }: { id?: string; dir: 'in' | 'out' }) {
   const [busy, setBusy] = useState(false);
   const set = (p: Partial<typeof f>) => setF((x) => ({ ...x, ...p }));
   if (id && !old) return <Modal title="Transaction"><div className="full empty">This entry is no longer in the books.</div></Modal>;
+  if (old?.transfer_id) return <TransferEntry l={old} />;
   if (old && (old.reverses_id || old.reversed_by_id)) return <ReversedEntry l={old} />;
 
   const fundId = f.fund_id || db.funds[0]?.id || '';

@@ -5,8 +5,8 @@ import { addDays, daysBetween, round2, sum } from './format';
 
 export type FundRow = { fund: Fund; opening: number; inn: number; out: number; balance: number };
 /** A fund's money by kind, as on Team Balances. The same rules as public.team_money() in 0003_team_money.sql. */
-export type MoneyRow = { fund: Fund; team: Team | null; carry: number; zeffy: number; deposits: number; reimbursements: number; direct: number; balance: number };
-export type MoneyKind = 'Carry-Over' | 'Zeffy' | 'Deposit' | 'Reimbursement' | 'Direct Expense';
+export type MoneyRow = { fund: Fund; team: Team | null; carry: number; zeffy: number; deposits: number; reimbursements: number; direct: number; transfers: number; balance: number };
+export type MoneyKind = 'Carry-Over' | 'Zeffy' | 'Deposit' | 'Reimbursement' | 'Direct Expense' | 'Transfer';
 
 export class Calc {
   constructor(public db: Db, public today: string) {}
@@ -150,6 +150,7 @@ export class Calc {
   /* team balances */
   /** The kind of money an entry is; a reversal counts as the kind of the entry it undoes. */
   kindOf(l: Ledger): MoneyKind {
+    if (l.transfer_id) return 'Transfer';
     const dir = l.reverses_id ? (l.dir === 'in' ? 'out' : 'in') : l.dir;
     const req = l.request_id ? this.request(l.request_id) : null;
     const spentKind: MoneyKind = !l.request_id || (req && this.isDirect(req)) ? 'Direct Expense' : 'Reimbursement';
@@ -166,7 +167,7 @@ export class Calc {
     const t = this.fundTotal(f.id);
     return { fund: f, team: this.db.teams.find((x) => x.fund_id === f.id) || this.team(f.team_id),
       carry: t?.carry ?? 0, zeffy: t?.zeffy ?? 0, deposits: t?.deposits ?? 0, reimbursements: t?.reimbursements ?? 0, direct: t?.direct ?? 0,
-      balance: t?.balance ?? 0 };
+      transfers: t?.transfers ?? 0, balance: t?.balance ?? 0 };
   }
   /** One row per team fund, then the unrestricted funds. */
   /** Every fund with money or any activity; a fund that has never had an entry or a gift is left out. */
@@ -198,7 +199,7 @@ export class Calc {
     const cleared = this.clearedIds();
     // An entry reversed by month end never reached the bank, so it and its reversal are left out (as bank_month_figures does).
     const reversedBy = (l: Ledger) => { const z = l.reversed_by_id ? this.db.ledger.find((x) => x.id === l.reversed_by_id) : null; return !!z && z.date <= monthEnd; };
-    const outstanding = this.db.ledger.filter((l) => l.date <= monthEnd && l.dir === 'out' && !l.reverses_id && !reversedBy(l) && !cleared.has(l.id) && l.source !== 'Opening Balance');
+    const outstanding = this.db.ledger.filter((l) => l.date <= monthEnd && l.dir === 'out' && !l.reverses_id && !reversedBy(l) && !cleared.has(l.id) && l.source !== 'Opening Balance' && !l.transfer_id);
     return { outstanding, transit: this.inTransit(monthEnd) };
   }
   /** The month a date falls in is reconciled and locked. */

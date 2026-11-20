@@ -164,7 +164,7 @@ export function candidates(db: Db, line: BankLine, limit = 60): Match[] {
   const dist = (a: number, d: string) => Math.abs(a - amt) * 1000 + Math.abs(daysBetween(line.date, d));
   const out: [number, Match][] = [];
   db.ledger.forEach((l) => {
-    if (u.ledger.has(l.id) || l.source === 'Opening Balance') return;
+    if (u.ledger.has(l.id) || l.source === 'Opening Balance' || l.transfer_id) return;
     if ((line.amount < 0) !== (l.dir === 'out')) return;
     out.push([dist(l.amount, l.date), { ledger: l }]);
   });
@@ -188,7 +188,7 @@ export function suggest(db: Db, line: BankLine, taken?: { ledger: Set<string>; p
     if (best) return best;
   }
   db.ledger.forEach((l) => {
-    if (u.ledger.has(l.id) || l.source === 'Opening Balance') return;
+    if (u.ledger.has(l.id) || l.source === 'Opening Balance' || l.transfer_id) return;
     if ((line.amount < 0) !== (l.dir === 'out') || round2(l.amount) !== amt || !near(l.date)) return;
     // A Zeffy gift reaches the bank inside a payout, not on its own, unless it has no payout date yet.
     const don = l.donation_id ? db.donations.find((x) => x.id === l.donation_id) : null;
@@ -232,5 +232,5 @@ export function unclearedOld(db: Db, calc: Calc, today: string): Ledger[] {
   if (!first) return [];
   const cleared = calc.clearedIds();
   const cut = addDays(today, -30);
-  return db.ledger.filter((l) => l.date >= first && l.date < cut && l.source !== 'Opening Balance' && !cleared.has(l.id));
+  return db.ledger.filter((l) => l.date >= first && l.date < cut && l.source !== 'Opening Balance' && !l.transfer_id && !cleared.has(l.id));
 }

@@ -90,6 +90,8 @@ export type Ledger = Base & {
   receipt: boolean; receipt_path: string | null; receipt_name: string | null; pay_method: string | null; pay_ref: string | null;
   /** A reversal points at the entry it undoes; the undone entry points back at its reversal. */
   reverses_id: string | null; reversed_by_id: string | null; reason: string | null;
+  /** Money moved between two funds (0017): both rows point at the fund_transfers record, and never change. */
+  transfer_id?: string | null;
 };
 export type Receipt = Base & {
   request_id: string; vendor: string | null; amount: number; date: string; file_name: string | null; file_path: string | null; uploaded_by: string | null;
@@ -116,7 +118,7 @@ export type ZeffySync = { id: string; ran_at: string; source: 'api' | 'file' | '
 
 /** One fund's figures from portal_totals(). */
 export type FundTotal = { id: string; name: string; restricted: boolean; team_id: string | null; opening: number; inn: number; out: number; carry: number;
-  zeffy: number; deposits: number; reimbursements: number; direct: number; balance: number; committed: number; available: number };
+  zeffy: number; deposits: number; reimbursements: number; direct: number; transfers?: number; balance: number; committed: number; available: number };
 /** Every money figure the board pages show, worked out once in the database (portal_totals). */
 export type Totals = { funds: FundTotal[]; cash: { total: number; restricted: number; unrestricted: number };
   in_by_source: Record<string, number>; out_by_category: Record<string, number>; raised: number; spent: number };

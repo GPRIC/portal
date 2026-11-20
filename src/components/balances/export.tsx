@@ -42,15 +42,15 @@ async function buildWorkbook(db: Db, q: Quarter, today: string): Promise<ArrayBu
   const tb = wb.addWorksheet('Team Balances');
   tb.addRow([`Team Balances as of ${date(asOf)}`]).font = { bold: true };
   tb.addRow([]);
-  const head = tb.addRow(['Team', 'Carry-Over', 'Zeffy', 'Deposits', 'Reimbursements', 'Direct Expenses', 'Balance']);
+  const head = tb.addRow(['Team', 'Carry-Over', 'Zeffy', 'Deposits', 'Reimbursements', 'Direct Expenses', 'Transfers', 'Balance']);
   head.font = { bold: true };
   const rows = calc.teamBalances();
-  rows.forEach((r) => tb.addRow([r.team?.name || r.fund.name, r.carry, r.zeffy, r.deposits, r.reimbursements, r.direct, r.balance]));
-  const s = (k: 'carry' | 'zeffy' | 'deposits' | 'reimbursements' | 'direct' | 'balance') => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 100;
-  tb.addRow(['Total', s('carry'), s('zeffy'), s('deposits'), s('reimbursements'), s('direct'), s('balance')]).font = { bold: true };
+  rows.forEach((r) => tb.addRow([r.team?.name || r.fund.name, r.carry, r.zeffy, r.deposits, r.reimbursements, r.direct, r.transfers, r.balance]));
+  const s = (k: 'carry' | 'zeffy' | 'deposits' | 'reimbursements' | 'direct' | 'transfers' | 'balance') => Math.round(rows.reduce((a, r) => a + r[k], 0) * 100) / 100;
+  tb.addRow(['Total', s('carry'), s('zeffy'), s('deposits'), s('reimbursements'), s('direct'), s('transfers'), s('balance')]).font = { bold: true };
   const g = calc.grants();
-  g.awarded.filter((x) => x.received < x.awarded).forEach((x) => tb.addRow([`Awarded, not received (not cash): ${x.funder}`, null, null, null, null, null, x.awarded - x.received]));
-  tb.columns = [{ width: 44 }, ...Array.from({ length: 6 }, () => ({ width: 16, style: { numFmt: '#,##0.00' } }))];
+  g.awarded.filter((x) => x.received < x.awarded).forEach((x) => tb.addRow([`Awarded, not received (not cash): ${x.funder}`, null, null, null, null, null, null, x.awarded - x.received]));
+  tb.columns = [{ width: 44 }, ...Array.from({ length: 7 }, () => ({ width: 16, style: { numFmt: '#,##0.00' } }))];
 
   for (const name of SHEETS) {
     const all = db[name] as unknown as Record<string, unknown>[];

@@ -89,6 +89,7 @@ export const HELP: Record<string, About> = {
       'Awarded, Not Received lists grants that are promised but are not cash; they never count in the bank balance.',
       'Zeffy gifts arrive by themselves once the Zeffy key is set. Until then, Import Zeffy File takes the All Payments export. Gifts with no Fund in Zeffy wait under Unassigned Gifts.',
       'Monthly Reconciliation: upload the Citizens statement, enter its ending balance, and match bank lines to portal entries. When the difference is $0.00 the month can be marked reconciled, and it locks.',
+      'Transfer Money (Treasurer and bookkeeper) moves money from one team to another inside the books, always with a reason. Both teams see it, History logs it, and bank matching leaves it out. The money rules apply to the team giving the money. A transfer is never undone: transfer it back the other way.',
       'Quarterly Export saves every record to a spreadsheet file for the accountant.',
     ],
     who: WHO,
