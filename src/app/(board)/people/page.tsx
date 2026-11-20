@@ -169,21 +169,22 @@ function PersonForm({ p, onDone }: { p: Person; onDone: () => void }) {
     }
     return null;
   }, 'Saved');
-  // A cancelled invite needs no reason typed (the button used to stay greyed out until one was, and looked like it did
-  // nothing); the database still requires one, so a blank one is recorded as 'Invite cancelled'. Turning off a login
-  // still needs a reason, and the label says so.
+  // Someone who has never signed in is still an invite, even though a sent invite already made their login (status
+  // 'invited' or 'not_sent'): the button says Cancel Invite and needs no reason typed. The database still requires one,
+  // so a blank one is recorded as 'Invite cancelled'. Turning off someone who has signed in still needs a reason.
+  const pending = canInvite;
   const turnOff = async () => {
     const reason = await ui.ask({
-      title: p.has_login ? 'Turn Off Access' : 'Cancel Invite', ok: p.has_login ? 'Turn Off Access' : 'Cancel Invite', danger: true,
-      body: p.has_login
-        ? <>{who} will no longer see or change anything in the portal, from their next click. Nothing about them is deleted: their name stays on everything they did, and you can turn access back on at any time.</>
-        : <>The invite for {who} is cancelled. You can reopen it later.</>,
-      label: p.has_login ? 'Reason (Required)' : 'Reason (Optional)',
-      optional: !p.has_login,
-      placeholder: p.has_login ? 'For example: left the board in October' : 'For example: sent to the wrong email',
+      title: pending ? 'Cancel Invite' : 'Turn Off Access', ok: pending ? 'Cancel Invite' : 'Turn Off Access', danger: true,
+      body: pending
+        ? <>The invite for {who} ({p.email}) is cancelled: the link in the email no longer gets them in. You can reopen it later, or invite a different email.</>
+        : <>{who} will no longer see or change anything in the portal, from their next click. Nothing about them is deleted: their name stays on everything they did, and you can turn access back on at any time.</>,
+      label: pending ? 'Reason (Optional)' : 'Reason (Required)',
+      optional: pending,
+      placeholder: pending ? 'For example: sent to the wrong email' : 'For example: left the board in October',
     });
     if (reason == null) return;
-    await act(() => supabase().rpc('people_turn_off', { p_email: p.email, p_reason: reason || 'Invite cancelled' }), p.has_login ? 'Access turned off for ' + who : 'Invite cancelled');
+    await act(() => supabase().rpc('people_turn_off', { p_email: p.email, p_reason: reason || 'Invite cancelled' }), pending ? 'Invite cancelled for ' + who : 'Access turned off for ' + who);
   };
   const turnOn = async () => {
     const ok = await ui.confirm({
@@ -201,11 +202,11 @@ function PersonForm({ p, onDone }: { p: Person; onDone: () => void }) {
     <Modal title={who} foot={<>
       <span className="btnrow">
         {p.is_me ? null : off ? <button className="btn" onClick={turnOn} disabled={busy}>{p.has_login ? 'Turn On Access' : 'Reopen Invite'}</button>
-          : <button className="btn dan" onClick={turnOff} disabled={busy}>{p.has_login ? 'Turn Off Access' : 'Cancel Invite'}</button>}
+          : <button className="btn dan" onClick={turnOff} disabled={busy}>{pending ? 'Cancel Invite' : 'Turn Off Access'}</button>}
         {canInvite ? <button className="btn" onClick={resend} disabled={busy}>Resend Invite</button> : null}
       </span>
       <span className="btnrow">
-        <button className="btn" onClick={ui.close}>Cancel</button>
+        <button className="btn" onClick={ui.close}>Close</button>
         {p.is_me || off ? null : <button className="btn pri" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>}
       </span>
     </>}>
