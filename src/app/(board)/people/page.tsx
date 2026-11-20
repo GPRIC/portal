@@ -169,16 +169,21 @@ function PersonForm({ p, onDone }: { p: Person; onDone: () => void }) {
     }
     return null;
   }, 'Saved');
+  // A cancelled invite needs no reason typed (the button used to stay greyed out until one was, and looked like it did
+  // nothing); the database still requires one, so a blank one is recorded as 'Invite cancelled'. Turning off a login
+  // still needs a reason, and the label says so.
   const turnOff = async () => {
     const reason = await ui.ask({
       title: p.has_login ? 'Turn Off Access' : 'Cancel Invite', ok: p.has_login ? 'Turn Off Access' : 'Cancel Invite', danger: true,
       body: p.has_login
         ? <>{who} will no longer see or change anything in the portal, from their next click. Nothing about them is deleted: their name stays on everything they did, and you can turn access back on at any time.</>
         : <>The invite for {who} is cancelled. You can reopen it later.</>,
-      placeholder: 'For example: left the board in October',
+      label: p.has_login ? 'Reason (Required)' : 'Reason (Optional)',
+      optional: !p.has_login,
+      placeholder: p.has_login ? 'For example: left the board in October' : 'For example: sent to the wrong email',
     });
     if (reason == null) return;
-    await act(() => supabase().rpc('people_turn_off', { p_email: p.email, p_reason: reason }), p.has_login ? 'Access turned off for ' + who : 'Invite cancelled');
+    await act(() => supabase().rpc('people_turn_off', { p_email: p.email, p_reason: reason || 'Invite cancelled' }), p.has_login ? 'Access turned off for ' + who : 'Invite cancelled');
   };
   const turnOn = async () => {
     const ok = await ui.confirm({
