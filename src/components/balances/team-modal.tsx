@@ -9,13 +9,15 @@ import { Cash, cash, download } from './hint';
 
 export const KTONE: Record<MoneyKind, Tone> = { Zeffy: 'grn', Deposit: 'blu', Reimbursement: 'vio', 'Direct Expense': 'gry', 'Carry-Over': 'gry' };
 
-/** Ledger rows that repeat another row exactly (same date, party, amount and memo): likely entered twice. */
+/** Ledger rows that repeat another row exactly (same date, party, amount and memo): likely entered twice.
+ *  The donor and the gift are part of the key: Zeffy rows have no party and the same memo, so two different
+ *  donors giving the same amount on the same day are never flagged, and a row tied to its own gift is never a copy of another gift's row. */
 export function duplicateIds(rows: Ledger[]): Set<string> {
   const seen = new Map<string, string>();
   const dup = new Set<string>();
   rows.slice().sort((a, b) => a.id.localeCompare(b.id)).forEach((l) => {
     if (l.source === 'Opening Balance') return;
-    const k = [l.fund_id, l.date, l.dir, l.amount, (l.party || '').toLowerCase(), (l.memo || '').toLowerCase()].join('|');
+    const k = [l.fund_id, l.date, l.dir, l.amount, (l.party || '').toLowerCase(), (l.memo || '').toLowerCase(), l.donor_id || '', l.donation_id || ''].join('|');
     if (seen.has(k)) dup.add(l.id); else seen.set(k, l.id);
   });
   return dup;
