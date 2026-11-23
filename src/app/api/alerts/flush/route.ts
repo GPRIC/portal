@@ -61,7 +61,10 @@ export async function GET(request: NextRequest) {
   if (!secret || !sameSecret(request.headers.get('authorization'), `Bearer ${secret}`)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  return Response.json(await flush(request, true));
+  // P36: once backups have started, a failed or missing nightly backup queues an email to the Treasurer (0022).
+  const admin = adminSupabase();
+  const backup = admin ? await admin.rpc('backup_overdue_check').then((r) => r.error ? 'check failed: ' + r.error.message : r.data) : 'no service key';
+  return Response.json({ ...(await flush(request, true)), backup });
 }
 
 export async function POST(request: NextRequest) {
