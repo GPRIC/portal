@@ -106,7 +106,11 @@ await fails(B1, `select public.approve_request($1)`, [reqP], /already approved/,
 a = (await as(B2, `select public.approve_request($1) a`, [reqP])).rows[0].a;
 ok(a.status === 'Approved', 'second approval approves');
 a = (await as(B1, `select public.approve_request($1) a`, [reqR])).rows[0].a;
-ok(a.status === 'Approved' && a.needed === 1, 'under threshold needs one approval');
+// 0019: reqR's Zelle has never been paid, so even under the threshold it needs a second board approval.
+ok(a.status === 'Submitted' && a.needed === 2, 'under threshold, a new Zelle still needs two approvals');
+await fails(B1, `select public.mark_request_paid($1, '2026-11-01', 'Zelle', 'ZC77')`, [reqR], /only an approved request/i, 'not payable after one approval');
+a = (await as(B3, `select public.approve_request($1) a`, [reqR])).rows[0].a;
+ok(a.status === 'Approved', 'the second approval approves the new-Zelle request');
 await fails(B1, `insert into public.request_approvals (request_id, user_id, approver_name) values ($1, $2, 'x')`, [reqP, BOARD1],
   /permission denied/, 'approvals only through approve_request');
 
