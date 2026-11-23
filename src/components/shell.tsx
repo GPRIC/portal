@@ -14,6 +14,7 @@ import { ROLE_LABEL } from '@/lib/types';
 import { Modal, UIHost, UIProvider, useReadOnly, useUI } from './ui';
 import { TipsProvider } from './tips';
 import { Icon, ReportProblem } from './problems/report-problem';
+import { ChangeOwnEmail } from './change-email';
 
 /** Pages the CPA does not see (P35): the calendar is the board's and the teams', not the books. */
 export const NOT_FOR_CPA = ['/calendar'];
@@ -82,6 +83,7 @@ function TopBar() {
   const path = usePathname();
   const router = useRouter();
   const { me, user, role, isTreasurer, readOnly } = useData();
+  const ui = useUI();
   const signOut = async () => { await supabase().auth.signOut(); router.replace('/login'); router.refresh(); };
   return (
     <header className="top">
@@ -100,7 +102,9 @@ function TopBar() {
       <span className="chip who" tabIndex={0}>
         <span className="av grn">{initials(me)}</span><span className="who-name">{me}</span>
         {role ? <span className="muted who-role">{ROLE_LABEL[role]}</span> : null}
-        <span className="pop r">Signed in as {user.email}{role ? ' · ' + ROLE_LABEL[role] : ''}. Two-step sign-in is on.</span>
+        <span className="pop r">Signed in as {user.email}{role ? ' · ' + ROLE_LABEL[role] : ''}. Two-step sign-in is on.
+          {/* P34: My Account */}
+          <button type="button" className="doclink" style={{ display: 'block', marginTop: 6 }} onClick={() => ui.open(<ChangeOwnEmail current={user.email} />)}>Change My Email</button></span>
       </span>
       <ThemeToggle />
       <button className="btn sm" onClick={signOut}>Sign Out</button>

@@ -16,7 +16,7 @@
 --   * Column names: team_asked / team_granted, never team_id, so an ask (phone, Zelle, email) never reaches a team's
 --     History (log_team reads team_id). The CPA's History leaves both tables out.
 -- Nothing here redefines a function 0017 (team transfers) changed. log_area, log_label and change_log_cpa are their
--- live bodies (0014) with the two tables added; update_my_profile is its live body (0003) with the Zelle lock.
+-- live bodies (0014) with the two tables added (and 0021's email_changes, named ahead); update_my_profile is its live body (0003) with the Zelle lock.
 
 -- ---------------------------------------------------------------- tables
 
@@ -455,7 +455,7 @@ as $$
     when 'meetings' then 'Meetings' when 'meeting_votes' then 'Meetings'
     when 'calendar_events' then 'Calendar' when 'problem_reports' then 'Problems'
     when 'portal_access' then 'People' when 'people_invites' then 'People'
-    when 'access_requests' then 'People' when 'access_invites' then 'People'
+    when 'access_requests' then 'People' when 'access_invites' then 'People' when 'email_changes' then 'People'
     else 'Settings' end;
 $$;
 
@@ -505,6 +505,7 @@ begin
     when 'people_invites' then 'Invite · ' || coalesce(nullif(r ->> 'name', ''), r ->> 'email', '') || coalesce(' · ' || v_role, '')
     when 'access_requests' then 'Access request · ' || coalesce(nullif(r ->> 'name', ''), r ->> 'email', '') || coalesce(' · ' || (r ->> 'status'), '')
     when 'access_invites' then 'Sign-up invite · ' || coalesce(nullif(r ->> 'name', ''), r ->> 'email', '')
+    when 'email_changes' then 'Email change · ' || coalesce(r ->> 'old_email', '') || ' to ' || coalesce(r ->> 'new_email', '')
     when 'settings' then 'Settings'
     when 'zeffy_sync_log' then 'Zeffy sync · ' || coalesce(r ->> 'source', '')
     when 'zeffy_skip' then 'Zeffy gift skipped · ' || coalesce(r ->> 'zeffy_key', '')
@@ -523,6 +524,30 @@ select c.id, c.at, c.user_id, public.cpa_mask_text(c.who) as who, c.role, c.acti
   from public.change_log c
  where (select public.is_cpa())
    and c.tbl not in ('team_users','team_invites','calendar_events','problem_reports','sessions','seen_tips','portal_access','board_members',
-                     'people_invites','access_requests','access_invites');
+                     'people_invites','access_requests','access_invites','email_changes');
 revoke all on public.change_log_cpa from public, anon, authenticated;
 grant select on public.change_log_cpa to authenticated;
+
+-- ---------------------------------------------------------------- a login with no seat reaches nothing
+
+-- True when the caller has a portal seat that is on, or a team login. A self sign-up waiting for approval (or
+-- declined) has neither. Used by the restrictive policies below.
+create or replace function public.has_seat()
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (select 1 from public.portal_access a where a.user_id = auth.uid() and a.archived_at is null)
+      or exists (select 1 from public.team_users u where u.user_id = auth.uid());
+$$;
+revoke all on function public.has_seat() from public, anon;
+grant execute on function public.has_seat() to authenticated;
+
+-- Report a problem and its files never asked for a role (0009, 0014): narrow them to logins with a seat, so an open
+-- sign-up cannot file reports or store files before a board member approves it.
+create policy seatless_no_reports on public.problem_reports as restrictive for insert to authenticated
+  with check ((select public.has_seat()));
+create policy seatless_no_files on storage.objects as restrictive for all to authenticated
+  using ((select public.has_seat())) with check ((select public.has_seat()));

@@ -55,6 +55,8 @@ ok(ob.length === 1 && ob[0].to_emails[0] === 'parent@example.org' && ob[0].link 
 // ---------------------------------------------------------------- ask
 await fails(NT, `select public.access_request_submit($1)`, [JSON.stringify({ kind: 'team', name: 'Sample Parent', team_id: 'T-9255' })], /Zelle/, 'a team member must give a Zelle');
 const r1 = await one(NT, `select public.access_request_submit($1)`, [JSON.stringify({ kind: 'team', name: 'Sample Parent', phone: '555-0100', zelle: 'parent@example.org', team_id: 'T-9255', invite: tok })]);
+await fails(NT, `insert into public.problem_reports (page, notes) values ('/x', 'spam')`, [], /row-level security/, 'a pending login cannot file a problem report');
+await fails(NT, `insert into storage.objects (bucket_id, name) values ('board-files', 'problems/${NEWT}/x.png')`, [], /row-level security/, 'a pending login cannot store a file');
 await fails(NT, `select public.access_request_submit($1)`, [JSON.stringify({ kind: 'team', name: 'Again', zelle: 'z', team_id: 'T-9255' })], /already waiting/, 'one open request at a time');
 ok((await one(NT, `select public.access_request_mine()`)).status === 'Pending', 'the person sees their request as pending');
 ob = await q(`select to_emails from public.email_outbox where kind = 'access_request'`);

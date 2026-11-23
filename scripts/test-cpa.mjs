@@ -199,7 +199,7 @@ const READS = new Set(['my_role', 'is_board', 'is_treasurer', 'is_cpa', 'is_cpa_
   // the CPA's contact masks (immutable, no table)
   'cpa_contact_col', 'cpa_mask_text', 'cpa_mask_json',
   // the sign-up page (0020): team names, an invite's sender, the caller's own request; none reads the books
-  'access_invite_lookup', 'access_team_choices', 'access_request_mine']);
+  'access_invite_lookup', 'access_team_choices', 'access_request_mine', 'has_seat']);
 const fns = await q(`select p.oid::regprocedure::text sig, p.proname, p.pronargs, p.provolatile,
                             array(select format_type(t, null) from unnest(p.proargtypes) t) args
                        from pg_proc p join pg_namespace n on n.oid = p.pronamespace

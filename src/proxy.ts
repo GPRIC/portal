@@ -6,9 +6,10 @@ import { SUPABASE_KEY, SUPABASE_URL, configured } from '@/lib/supabase/env';
 // Row security in the database is the real guard; this only routes people.
 // /api/zeffy is called by the Vercel cron and Zeffy's webhook, which check their own secrets.
 // /api/alerts/flush only sends what is already queued (and its cron GET checks CRON_SECRET).
+// /confirm-email and /api/email-change confirm a new sign-in email from its link (P34; the token is the check).
 // /request-access and /api/request-access are the self sign-up page and the route that makes its login (P33).
 // /sw.js, /manifest.webmanifest and /app-icon are the phone app's files, which the phone fetches without a session.
-const OPEN = ['/login', '/auth', '/setup', '/request-access', '/api/request-access', '/api/zeffy', '/api/alerts', '/sw.js', '/manifest.webmanifest', '/app-icon'];
+const OPEN = ['/login', '/auth', '/setup', '/request-access', '/api/request-access', '/confirm-email', '/api/email-change', '/api/zeffy', '/api/alerts', '/sw.js', '/manifest.webmanifest', '/app-icon'];
 
 export async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;

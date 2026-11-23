@@ -17,7 +17,7 @@ export const maxDuration = 60;
 
 type Row = { id: number; kind: string; subject: string; body_text: string; link: string; to_emails: string[] };
 // The link line under each email, by kind (0013 requests; 0020 access requests, answers and sign-up invites).
-const LINK_LABEL: Record<string, string> = { access_request: 'Review on People', access_answer: 'Sign in', access_invite: 'Set up your account' };
+const LINK_LABEL: Record<string, string> = { access_request: 'Review on People', access_answer: 'Sign in', access_invite: 'Set up your account', email_change: 'Confirm your new email' };
 
 function siteOrigin(request: NextRequest): string {
   const prod = process.env.VERCEL_PROJECT_PRODUCTION_URL;

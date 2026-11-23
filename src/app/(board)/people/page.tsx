@@ -15,6 +15,7 @@ import { date } from '@/lib/format';
 import { supabase } from '@/lib/supabase/client';
 import { Icon } from '@/components/problems/report-problem';
 import { AccessPanel } from './access-panel';
+import { ChangeOwnEmail, ChangePersonEmail } from '@/components/change-email';
 
 type Role = 'treasurer' | 'board' | 'bookkeeper' | 'cpa';
 type Status = 'active' | 'invited' | 'not_sent' | 'off';
@@ -214,7 +215,8 @@ function PersonForm({ p, onDone }: { p: Person; onDone: () => void }) {
         {p.is_me || off ? null : <button className="btn pri" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>}
       </span>
     </>}>
-      <Kv k="Email">{p.email}</Kv>
+      <Kv k="Email">{p.email}
+        {p.has_login && !off ? <> <button type="button" className="doclink" onClick={() => ui.open(p.is_me ? <ChangeOwnEmail current={p.email} /> : <ChangePersonEmail who={who} current={p.email} onDone={onDone} />)}>Change Email</button></> : null}</Kv>
       <Kv k="Status"><Badge tone={tone}>{label}</Badge>
         {p.status === 'off' && p.off_reason ? <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>Turned off {date(p.off_at)}{p.off_by ? ' by ' + p.off_by : ''}: {p.off_reason}</div> : null}
         {p.send_error && p.status !== 'off' ? <div className="warn" style={{ marginTop: 6 }}>The last invite email did not go out: {p.send_error}. The portal&apos;s email sender is limited to a few emails an hour; try Resend Invite later.</div> : null}
