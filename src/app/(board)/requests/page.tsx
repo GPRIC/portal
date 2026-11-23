@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Page } from '@/components/shell';
 import { ListExport } from '@/components/export';
 import { rpc, uploadFile, useData } from '@/components/data';
+import { supabase } from '@/lib/supabase/client';
 import { Amount, Area, DateIn, Err, FileLink, Foot, FundSelect, num, orNull, Select, str, Txt } from '@/components/forms';
 import { Badge, Check, Kv, Lines, Modal, Seg, Table, useUI, Warnings, type Col, type Tone } from '@/components/ui';
 import { Tip } from '@/components/tips';
@@ -379,7 +380,7 @@ function RequestView({ id }: { id: string }) {
       <Kv k="Filed By"><span className="rq-fl"><Filer r={r} /><span className="muted">· {isD(r) ? 'Board' : t?.short || 'Team'} · {sd(r.submitted)}</span>
         {member ? <span title="Cannot approve this request"><Badge>Board Member</Badge></span> : null}</span></Kv>
       <Kv k="Status"><span className="rq-fl"><StBadge r={r} /><Timeline r={r} /></span></Kv>
-      {calc.needsVote(r) ? <Kv k="Approvals">{calc.approvalsFor(r.id).length} of {calc.needed(r)}{calc.approvalsFor(r.id).length ? <span className="muted"> · {calc.approvalsFor(r.id).map((a) => a.approver_name).join(', ')}</span> : null}</Kv> : null}
+      {calc.needsVote(r) ? <Kv k="Approvals">{calc.approvalsFor(r.id).length} of {calc.neededFor(r)}{calc.zelleIsNew(r) && calc.neededFor(r) > calc.needed(r) ? <span className="muted"> (first payment to this Zelle)</span> : null}{calc.approvalsFor(r.id).length ? <span className="muted"> · {calc.approvalsFor(r.id).map((a) => a.approver_name).join(', ')}</span> : null}</Kv> : null}
       {r.category ? <Kv k="Category">{r.category}</Kv> : null}
       {vendors ? <Kv k="Vendors">{vendors}</Kv> : null}
       {isR(r) && r.zelle_contact ? <Kv k="Zelle">{r.zelle_contact}</Kv> : null}
@@ -621,16 +622,36 @@ function DirectForm() {
 
 /** Records how a request was paid and writes its ledger row (mark_request_paid). */
 function PayForm({ id }: { id: string }) {
-  const { calc, run, isTreasurer } = useData();
+  const { calc, run, isTreasurer, role, user } = useData();
   const ui = useUI();
   const r = calc.request(id);
   const [method, setMethod] = useState<PayMethod>(r && isR(r) ? 'Zelle' : 'Check');
   const [when, setWhen] = useState(calc.today);
   const [ref, setRef] = useState('');
+  // Receipt before reimbursement (0019): a board member's override, with a reason, lets it be paid first.
+  const missing = !!r && calc.missingReceipt(r);
+  const [overridden, setOverridden] = useState<boolean | null>(missing ? null : true);
+  useEffect(() => {
+    if (!missing) return;
+    supabase().from('money_overrides').select('id').eq('record_id', id).eq('rule', 'Receipt before payment').limit(1)
+      .then(({ data }) => setOverridden(!!data?.length));
+  }, [id, missing]);
   if (!r) return <Modal title="Record Payment"><div className="full empty">This request was archived.</div></Modal>;
+  const filedByMe = r.submitted_by_user === user.id || (!!user.email && (r.requestor_email || '').toLowerCase() === user.email.toLowerCase());
+  const canOverride = (role === 'treasurer' || role === 'board') && !filedByMe;
+  const receiptBlock = missing && overridden === false;
+  const overrideReceipt = async () => {
+    const why = await ui.ask({ title: 'Pay Before The Receipt', body: <>This reimbursement has no receipt attached. Record why it can be paid first; this shows in History.</>, ok: 'Allow Payment', label: 'Why the receipt can wait' });
+    if (!why) return;
+    const ok = await run(() => rpc('request_receipt_override', { p_request_id: r.id, p_reason: why }), 'Payment allowed before the receipt');
+    if (ok !== false) setOverridden(true);
+  };
+  const secondDue = method === 'Zelle' && calc.zelleSecondDue(r);
   const t = calc.team(r.team_id);
   const w = t?.fund_id ? calc.spendWarnings(t.fund_id, r.amount, 'Robotics Teams') : ['This team has no fund. Set one under Teams first.'];
   const save = async () => {
+    if (receiptBlock) { ui.toast('A reimbursement is paid once its receipt is attached.' + (canOverride ? ' Use Pay Before Receipt to record why it can wait.' : ' A board member can let it be paid first.'), true); return; }
+    if (secondDue) { ui.toast('This is the first payment to this Zelle, so a second board member has to approve it first.', true); return; }
     let override: string | null = null;
     if (w.length && t?.fund_id) {
       if (!isTreasurer) { ui.toast('Blocked: ' + w.join(' ') + ' Only the Treasurer can override.', true); return; }
@@ -643,7 +664,8 @@ function PayForm({ id }: { id: string }) {
   };
   const check = method === 'Check';
   return (
-    <Modal title="Record Payment" foot={<Foot onSave={save} saveLabel="Record Payment" />}>
+    <Modal title="Record Payment" foot={<Foot onSave={save} saveLabel="Record Payment"
+      extra={receiptBlock && canOverride ? <button type="button" className="btn amb-btn" onClick={overrideReceipt}>Pay Before Receipt</button> : undefined} />}>
       <div className="full reqhead"><TypeBadge r={r} /><b>{t?.short}</b><span className="muted">·</span>{forText(r)}</div>
       <Kv k="Amount"><b>{money(r.amount)}</b></Kv>
       <Kv k="Pay To">{isR(r) ? requestor(r) + (r.zelle_contact ? ' · Zelle ' + r.zelle_contact : '') : (r.pay_to || '') + (r.vendor ? ' · ' + r.vendor : '')}</Kv>
@@ -652,6 +674,9 @@ function PayForm({ id }: { id: string }) {
       <Kv k={check ? 'Check Number' : 'Confirmation Number'}><Txt value={ref} onChange={setRef} placeholder={check ? 'e.g. 110' : method === 'Zelle' ? 'Zelle confirmation code' : 'Reference from the bank'} /></Kv>
       <div className="full muted">Saving writes one Out row to the Ledger for the whole request: {money(-r.amount)} from {calc.fundName(t?.fund_id) || 'the team fund'}.{isR(r) ? '' : ' It also starts the ' + calc.receiptDays + '-day receipt clock.'}</div>
       <Warnings list={w} blocks />
+      {receiptBlock ? <Warnings list={['No receipt is attached. A reimbursement is paid once its receipt is attached' + (canOverride ? '; Pay Before Receipt records why it can wait.' : '; a board member (Treasurer or board, not the person who filed it) can let it be paid first.')]} blocks /> : null}
+      {missing && overridden ? <div className="full muted">No receipt yet: a board member allowed payment before the receipt.</div> : null}
+      {secondDue ? <Warnings list={['This is the first payment to this Zelle, so a second board member has to approve it before it is paid.']} blocks /> : null}
     </Modal>
   );
 }

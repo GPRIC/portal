@@ -99,7 +99,26 @@ export class Calc {
   interestedMember(tid: string): Member | null {
     return this.board().find((m) => m.interest_team_id === tid) || null;
   }
-  needsVote(r: TeamRequest) { return r.type !== 'Direct Expense' && (r.status === 'Submitted' || r.status === 'Board Vote'); }
+  needsVote(r: TeamRequest) { return r.type !== 'Direct Expense' && (r.status === 'Submitted' || r.status === 'Board Vote' || this.zelleSecondDue(r)); }
+
+  /* P26 money rules (0019) */
+  /** A Zelle contact as the rules compare it: lower case, no spaces, brackets, dots, plus or dashes. Mirrors zelle_norm(). */
+  zelleNorm(p: string | null | undefined) { return (p || '').replace(/[\s().+-]/g, '').toLowerCase() || null; }
+  /** True when no other request has ever been paid by Zelle to this request's Zelle contact. Mirrors zelle_is_new(). */
+  zelleIsNew(r: TeamRequest) {
+    const z = this.zelleNorm(r.zelle_contact);
+    return !!z && !this.db.team_requests.some((o) => o.id !== r.id && !o.archived_at && !!o.paid_date && o.pay_method === 'Zelle' && this.zelleNorm(o.zelle_contact) === z);
+  }
+  /** A request approved with one approval before the new-Zelle rule, still waiting on its second. Mirrors zelle_second_due(). */
+  zelleSecondDue(r: TeamRequest) {
+    return r.status === 'Approved' && !r.vote_id && r.type !== 'Direct Expense' && this.zelleIsNew(r) && this.approvalsFor(r.id).length < 2;
+  }
+  /** Approvals this request needs: the amount rule, and at least two for a new Zelle. Mirrors request_approvals_needed(). */
+  neededFor(r: TeamRequest) { const n = this.needed(r); return this.zelleIsNew(r) ? Math.max(n, 2) : n; }
+  /** A reimbursement with no receipt attached (an override may still let it be paid). */
+  missingReceipt(r: TeamRequest) {
+    return r.type === 'Reimbursement' && !r.receipt_path && !this.db.receipts.some((x) => x.request_id === r.id && !x.archived_at);
+  }
 
   /* requests v2 (0006): direct expenses, refunds, replacement orders */
   isDirect(r: Pick<TeamRequest, 'type'>) { return r.type === 'Direct Expense'; }
