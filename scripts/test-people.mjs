@@ -242,7 +242,8 @@ ok((await seat(id('f5')))?.role === 'board', 'a cancelled People invite gives no
 // Every function a signed-in role can run, called as a turned-off board member, bookkeeper and CPA, with real
 // arguments (a real fund, request, locked month) and with nulls. Each must refuse or give nothing (null or empty).
 // PURE: text helpers that read no table and only rework their own arguments. SELF: the caller's own sign-in facts.
-const PURE = new Set(['log_action', 'log_area', 'log_money', 'log_summary', 'log_team_mask', 'log_team_mask_text', 'cpa_contact_col', 'cpa_mask_text', 'cpa_mask_json', 'pad_id']);
+// access_team_choices: the sign-up page's team names, open to anyone, signed in or not (0020).
+const PURE = new Set(['access_team_choices', 'log_action', 'log_area', 'log_money', 'log_summary', 'log_team_mask', 'log_team_mask_text', 'cpa_contact_col', 'cpa_mask_text', 'cpa_mask_json', 'pad_id']);
 const SELF = { my_name: (v, c) => v === c.email, is_cpa_login: (v, c) => v === (c === C) };
 await db.exec(`insert into public.bank_statements (month, locked_at) values ('2026-09-01', now()) on conflict (month) do update set locked_at = now()`);
 const realReq = (await q(`select id from public.team_requests where archived_at is null order by id limit 1`))[0].id;
@@ -266,7 +267,7 @@ for (const [claims, tag] of [[B, 'board'], [K, 'bookkeeper'], [C, 'CPA']]) {
       const args = f.args.map((t, i) => (mode === 'null' ? `null::${t}` : `${(REAL[t] || (() => 'null'))(f, i)}::${t}`)).join(', ');
       const x = await err(claims, `select public.${f.proname}(${args})::text v`);
       let fine;
-      if (x) fine = REFUSED.test(x.message) || /two-step|not allowed|Only the Treasurer|Board sign-in|Team sign-in/i.test(x.message)
+      if (x) fine = REFUSED.test(x.message) || /two-step|not allowed|Only the Treasurer|Board sign-in|Team sign-in|already has portal access/i.test(x.message)
         || (mode === 'null' && /not found/i.test(x.message)); // a null id finds nothing before any role check; the real id above is refused
       else {
         const v = (await as(claims, `select public.${f.proname}(${args})::text v`)).rows[0].v;

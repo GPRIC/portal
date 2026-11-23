@@ -15,7 +15,9 @@ import { sameSecret } from '../../zeffy/zeffy-api';
 
 export const maxDuration = 60;
 
-type Row = { id: number; subject: string; body_text: string; link: string; to_emails: string[] };
+type Row = { id: number; kind: string; subject: string; body_text: string; link: string; to_emails: string[] };
+// The link line under each email, by kind (0013 requests; 0020 access requests, answers and sign-up invites).
+const LINK_LABEL: Record<string, string> = { access_request: 'Review on People', access_answer: 'Sign in', access_invite: 'Set up your account' };
 
 function siteOrigin(request: NextRequest): string {
   const prod = process.env.VERCEL_PROJECT_PRODUCTION_URL;
@@ -45,7 +47,7 @@ async function flushEmail(request: NextRequest, counted: boolean) {
     const res = await send({
       to: r.to_emails,
       subject: r.subject,
-      text: r.body_text + '\n\nOpen Requests: ' + origin + (r.link || '/requests'),
+      text: r.body_text + '\n\n' + (LINK_LABEL[r.kind] || 'Open Requests') + ': ' + origin + (r.link || '/requests'),
     });
     if (res.ok) sent++; else failed++;
     const done = await admin.rpc('email_outbox_done', { p_id: r.id, p_error: res.ok ? null : res.error, p_counted: counted });

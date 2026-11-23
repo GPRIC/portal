@@ -220,9 +220,15 @@ export function ProfileForm() {
       <Kv k="Email">{p.me.email}</Kv>
       <Kv k="Role">{p.me.role}</Kv>
       <Kv k="Name"><Txt value={name} onChange={setName} /></Kv>
-      <KvI k="Zelle Contact" tip="The phone number or email your Zelle account uses. Reimbursements are paid here.">
-        <Txt value={zelle} onChange={setZelle} placeholder="Phone or email" />
-      </KvI>
+      {p.me.zelle_contact ? (
+        <KvI k="Zelle Contact" tip="Reimbursements are paid here. It is locked once on record; the Treasurer or a board member changes it.">
+          {p.me.zelle_contact}
+        </KvI>
+      ) : (
+        <KvI k="Zelle Contact" tip="The phone number or email your Zelle account uses. Reimbursements are paid here. Once saved, only the Treasurer or a board member can change it.">
+          <Txt value={zelle} onChange={setZelle} placeholder="Phone or email" />
+        </KvI>
+      )}
       <Err msg={err} />
     </Modal>
   );

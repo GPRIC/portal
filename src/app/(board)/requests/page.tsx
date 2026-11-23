@@ -8,7 +8,7 @@ import { Amount, Area, DateIn, Err, FileLink, Foot, FundSelect, num, orNull, Sel
 import { Badge, Check, Kv, Lines, Modal, Seg, Table, useUI, Warnings, type Col, type Tone } from '@/components/ui';
 import { Tip } from '@/components/tips';
 import { date, initials, money, round2, sd, sum } from '@/lib/format';
-import { DIRECT_PAY, PAY_METHODS, PAY_TO, REQUEST_CATEGORIES, REQUEST_TYPES, type PayMethod, type RequestType, type Team, type TeamRequest } from '@/lib/types';
+import { DIRECT_PAY, PAY_METHODS, PAY_TO, REQUEST_CATEGORIES, REQUEST_TYPES, type PayMethod, type RequestType, type Team, type TeamRequest, type TeamUser } from '@/lib/types';
 import type { Calc } from '@/lib/calc';
 import { flushAlerts } from '@/lib/alerts';
 import { PhoneAlerts } from '@/components/phone-alerts';
@@ -863,8 +863,32 @@ function InviteForm({ teamId }: { teamId?: string }) {
   );
 }
 
+/** P33: a team login's Zelle is the payee record; only the Treasurer or a board member changes it, with a reason. */
+function ZelleForm({ u }: { u: TeamUser }) {
+  const { run } = useData();
+  const ui = useUI();
+  const [zelle, setZelle] = useState(u.zelle_contact || '');
+  const [why, setWhy] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+  const save = async () => {
+    if (!zelle.trim()) { setErr('Enter the Zelle email or phone.'); return; }
+    if (!why.trim()) { setErr('Give the reason; it is kept in History.'); return; }
+    const ok = await run(() => rpc('team_user_set_zelle', { p_user: u.user_id, p_zelle: zelle.trim(), p_reason: why.trim() }), 'Zelle changed');
+    if (ok !== false) ui.close();
+  };
+  return (
+    <Modal title={'Zelle · ' + (u.name || u.email || 'Team login')} foot={<Foot onSave={save} saveLabel="Change Zelle" />}>
+      <div className="full muted">Reimbursements this login files are paid to this Zelle. They cannot change it themselves.</div>
+      <Kv k="Now">{u.zelle_contact || <span className="muted">None on record</span>}</Kv>
+      <Kv k="New Zelle"><Txt value={zelle} onChange={setZelle} placeholder="Phone or email" /></Kv>
+      <Kv k="Reason"><Txt value={why} onChange={setWhy} placeholder="e.g. New bank account, confirmed by phone" /></Kv>
+      <Err msg={err} />
+    </Modal>
+  );
+}
+
 function TeamForm({ id }: { id?: string }) {
-  const { db, calc, run, isTreasurer } = useData();
+  const { db, calc, run, isTreasurer, role: myRole } = useData();
   const ui = useUI();
   const old = id ? calc.team(id) : null;
   const [f, setF] = useState(() => ({
@@ -894,6 +918,7 @@ function TeamForm({ id }: { id?: string }) {
     if (ok !== false) ui.close();
   };
   const logins = old ? teamLogins(calc, old.id) : null;
+  const zelleEdit = myRole === 'treasurer' || myRole === 'board';
   return (
     <Modal title={old ? old.name : 'Add Team'} foot={<Foot onDelete={old ? del : undefined} onSave={save} extra={old ? <button className="btn" onClick={() => ui.open(<InviteForm teamId={old.id} />)}>Invite Team Login</button> : undefined} />}>
       <Kv k="Name"><Txt value={f.name} onChange={(v) => set({ name: v })} placeholder="FRC 1234 Team Name" /></Kv>
@@ -915,7 +940,8 @@ function TeamForm({ id }: { id?: string }) {
       <Kv k="Joined GPRIC"><DateIn value={f.affiliated} onChange={(v) => set({ affiliated: v })} /></Kv>
       <Kv k="About"><Area value={f.blurb} onChange={(v) => set({ blurb: v })} /></Kv>
       {logins ? <Kv k="Team Logins">{logins.users.length || logins.pending.length
-        ? <Lines lines={[...logins.users.map((u) => (u.name || u.email) + ' · ' + u.role + (u.email ? ' · ' + u.email : '')), ...logins.pending.map((i) => i.email + ' · ' + i.role + ' · invited ' + sd(i.invited_at.slice(0, 10)))]} />
+        ? <Lines lines={[...logins.users.map((u) => <span key={u.user_id}>{(u.name || u.email) + ' · ' + u.role + (u.email ? ' · ' + u.email : '') + (u.zelle_contact ? ' · Zelle ' + u.zelle_contact : '')}
+            {zelleEdit ? <> <button type="button" className="doclink" onClick={() => ui.open(<ZelleForm u={u} />)}>Change Zelle</button></> : null}</span>), ...logins.pending.map((i) => i.email + ' · ' + i.role + ' · invited ' + sd(i.invited_at.slice(0, 10)))]} />
         : <span className="muted">None yet</span>}</Kv> : null}
       {old && db.board_members.some((m) => m.interest_team_id === old.id) ? <Kv k="Interested Member">{calc.interestedMember(old.id)?.title || ''}</Kv> : null}
       <Err msg={err} />

@@ -92,7 +92,7 @@ function TopBar() {
         {/* P37: Problem Reports is the Treasurer's only (row security too) */}
         {isTreasurer ? <Link href="/problems" className={'lockd' + (path === '/problems' ? ' on' : '')} title="Only you see this page in the menu"><Icon.lock />Problem Reports</Link> : null}
         {/* P39: People (who can sign in, and as what) is the Treasurer's only (the database checks too) */}
-        {isTreasurer ? <Link href="/people" className={'lockd' + (path === '/people' ? ' on' : '')} title="Only you see this page in the menu"><Icon.lock />People</Link> : null}
+        {isTreasurer || role === 'board' ? <Link href="/people" className={'lockd' + (path === '/people' ? ' on' : '')} title={isTreasurer ? 'Only you and board members see this page in the menu' : 'Access requests and sign-up invites'}><Icon.lock />People</Link> : null}
       </nav>
       {/* The CPA files nothing, problem reports included (0012_cpa.sql) */}
       {readOnly ? <span className="chip ro" title="The CPA login reads the books and exports them. It cannot add, change or upload anything.">Read only (CPA)</span>

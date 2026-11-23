@@ -3,6 +3,8 @@
 // file direct expenses, turns access off and on, and resends invites. Treasurer only: every action is a database
 // function that checks the role (0014_people.sql); invites go out through api/people-invite. Nothing is deleted.
 // Coaches and team treasurers are invited from Requests > Teams, not here.
+// P33: the Treasurer and board members also review self sign-ups here (Pending Requests) and send sign-up invites;
+// a board member sees only that part (access-panel.tsx; 0020_request_access.sql).
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Page } from '@/components/shell';
@@ -12,6 +14,7 @@ import { Badge, Check, Kv, Modal, Pills, Seg, Table, useUI, type Col, type Tone 
 import { date } from '@/lib/format';
 import { supabase } from '@/lib/supabase/client';
 import { Icon } from '@/components/problems/report-problem';
+import { AccessPanel } from './access-panel';
 
 type Role = 'treasurer' | 'board' | 'bookkeeper' | 'cpa';
 type Status = 'active' | 'invited' | 'not_sent' | 'off';
@@ -50,7 +53,7 @@ async function invite(body: Record<string, unknown>): Promise<string | null> {
 }
 
 export default function PeoplePage() {
-  const { isTreasurer } = useData();
+  const { isTreasurer, role } = useData();
   const ui = useUI();
   const [rows, setRows] = useState<Person[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -69,7 +72,8 @@ export default function PeoplePage() {
     return () => { live = false; };
   }, [isTreasurer, tick]);
 
-  if (!isTreasurer) return <Page title="People"><div className="panel empty">Only the Treasurer can see this page.</div></Page>;
+  if (!isTreasurer && role === 'board') return <Page title="People" help="people"><AccessPanel /></Page>;
+  if (!isTreasurer) return <Page title="People"><div className="panel empty">Only the Treasurer and board members can see this page.</div></Page>;
 
   const all = rows || [];
   const shown = all.filter((VIEWS.find((v) => v[0] === view) || VIEWS[0])[2]);
@@ -92,9 +96,10 @@ export default function PeoplePage() {
   return (
     <Page title="People" help="people" actions={<button className="btn pri" onClick={() => ui.open(<AddForm onDone={reload} />)}>Add Person</button>}>
       <div className="muted" style={{ marginTop: -10, marginBottom: 12, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-        <span className="lockd" title="Only the Treasurer sees this page" style={{ display: 'inline-flex', gap: 5, alignItems: 'center' }}><Icon.lock />Treasurer Only</span>
+        <span className="lockd" title="Board members see only the requests and invites" style={{ display: 'inline-flex', gap: 5, alignItems: 'center' }}><Icon.lock />Roles: Treasurer Only</span>
         <span>Coaches and team treasurers are invited from <Link className="lnk" href="/requests">Requests</Link>, under Teams.</span>
       </div>
+      <AccessPanel />
       <div className="panel">
         <Pills items={VIEWS.map(([k, tone, f]) => ({ key: k, label: k, tone, count: all.filter(f).length }))} active={view} onPick={setView} />
         <Table cols={cols} rows={shown} sort="name" onRow={open}

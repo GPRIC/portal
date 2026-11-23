@@ -14,6 +14,6 @@ export default async function TeamLayout({ children }: { children: React.ReactNo
   if (!data.user) redirect('/login');
   const { data: side } = await sb.rpc('whoami');
   if (side === 'board') redirect('/dashboard');
-  if (side !== 'team') redirect('/login');
+  if (side !== 'team') redirect('/dashboard');
   return <TeamApp user={data.user}>{children}</TeamApp>;
 }
