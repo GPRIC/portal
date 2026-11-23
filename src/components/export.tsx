@@ -8,6 +8,7 @@ import { Kv, Modal, Seg, useUI, type Col } from './ui';
 import { download } from './balances/hint';
 import { todayIso } from '@/lib/format';
 import type { Db } from '@/lib/types';
+import { expenseLine, revenueLine, statementRows } from '@/lib/statements';
 
 type Cell = string | number | boolean | null;
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -114,10 +115,11 @@ async function buildYear(db: Db, y: YearSpan): Promise<ArrayBuffer> {
   // Ledger: every entry dated in the year, reversals included (they are how money is undone).
   const L = db.ledger.filter((l) => inSpan(l.date, y)).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.id < b.id ? -1 : 1));
   sheet(wb, 'Ledger', ['Id', 'Date', 'Description', 'From / To', 'Fund', 'Source', 'Category', 'In', 'Out', 'Receipt', 'Paid By', 'Reference',
-    'Request', 'Reverses', 'Reversed By', 'Reason'],
-  L.map((l) => [l.id, l.date, l.memo, l.donor_id ? donor(l.donor_id)?.name || l.party : l.party, fund(l.fund_id),
+    'Request', 'Reverses', 'Reversed By', 'Reason', 'Asset', 'Form 990-EZ', 'Form 990-PF'],
+  L.map((l) => { const t = l.source === 'Opening Balance' ? null : (l.reverses_id ? l.dir === 'in' : l.dir === 'out') || l.source === 'Unspent Returned' || l.source === 'Refund' ? expenseLine(l.category) : revenueLine(l.source);
+    return [l.id, l.date, l.memo, l.donor_id ? donor(l.donor_id)?.name || l.party : l.party, fund(l.fund_id),
     l.source, l.category, l.dir === 'in' ? l.amount : null, l.dir === 'out' ? l.amount : null, l.receipt ? 'On file' : (l.dir === 'out' ? 'Missing' : null),
-    l.pay_method, l.pay_ref, l.request_id, l.reverses_id, l.reversed_by_id, l.reason].map(cell)));
+    l.pay_method, l.pay_ref, l.request_id, l.reverses_id, l.reversed_by_id, l.reason, l.asset ? 'Yes' : null, t?.ez, t?.pf].map(cell); }));
 
   // Donations: gifts dated in the year (archived gifts are already off the books and left out).
   const D = db.donations.filter((d) => inSpan(d.date, y)).sort((a, b) => (a.date < b.date ? -1 : 1));
@@ -159,7 +161,12 @@ async function buildYear(db: Db, y: YearSpan): Promise<ArrayBuffer> {
       const out = r2(during.filter((l) => l.dir === 'out').reduce((a, l) => a + l.amount, 0));
       return [f.name, f.restricted, team(f.team_id || db.teams.find((t) => t.fund_id === f.id)?.id || null), opening, inn, out, r2(opening + inn - out)].map(cell);
     }));
-  // No assets register exists in the portal yet; the sheet is added when one does.
+  // Year-end statements, the assets register and the tax-return line of each ledger source and category.
+  const st = statementRows(db, y.start, y.end, y.label);
+  sheet(wb, 'Statement of Activities', [String(st.activity[0][0]), '', '', ''], st.activity.slice(1).map((r) => r.map(cell)));
+  sheet(wb, 'Financial Position', [String(st.position[0][0]), ''], st.position.slice(1).map((r) => r.map(cell)));
+  sheet(wb, 'Assets', st.assets[0] as string[], st.assets.slice(1).map((r) => r.map(cell)));
+  sheet(wb, 'Tax Return Lines', st.tax[0] as string[], st.tax.slice(1).map((r) => r.map(cell)));
   return (await wb.xlsx.writeBuffer()) as ArrayBuffer;
 }
 
@@ -187,7 +194,7 @@ export function YearExportModal() {
       <Kv k="Year Type"><Seg value={kind} onChange={(v) => { setKind(v); setPick(''); }} options={[['fiscal', 'Fiscal Year'], ['calendar', 'Calendar Year']]} /></Kv>
       <Kv k="Year">{spans.length ? <Seg value={y?.label || ''} onChange={setPick} options={spans.map((s) => s.label)} /> : 'No entries yet.'}</Kv>
       <Kv k="Format">Excel (.xlsx)</Kv>
-      <Kv k="Includes">Sheets for the Ledger, Donations, Requests, Bank Months, Bank Lines and Fund Balances (opening, in, out and closing).</Kv>
+      <Kv k="Includes">Sheets for the Ledger (with its tax-return lines), Donations, Requests, Bank Months, Bank Lines, Fund Balances (opening, in, out and closing), the Statement of Activities, Financial Position, Assets and Tax Return Lines.</Kv>
       <div className="full muted">{y ? `Records dated ${y.start} to ${y.end}. Donors who asked to stay anonymous are named, with the Anonymous column marked: this is the books' copy.` : ''}</div>
     </Modal>
   );

@@ -123,6 +123,8 @@ function UnassignedModal() {
   const ui = useUI();
   const gifts = calc.unassignedGifts().slice().sort((a, b) => (a.date < b.date ? 1 : -1));
   const [pick, setPick] = useState<Record<string, string>>(() => Object.fromEntries(gifts.map((g) => [g.id, g.fund_id])));
+  // Monthly gifts: keep this donor's future monthly gifts with the fund picked (decision 9671), until changed.
+  const [keep, setKeep] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const general = db.settings.general_fund_id;
   const funds = db.funds.slice().sort((a, b) => (a.id === general ? -1 : b.id === general ? 1 : a.name.localeCompare(b.name)));
@@ -131,7 +133,15 @@ function UnassignedModal() {
   const save = async () => {
     setBusy(true);
     const ok = await run(async () => {
+      const kept = new Set<string>();
       for (const g of gifts) {
+        if (!g.recurring || !keep[g.id] || !g.donor_id || kept.has(g.donor_id)) continue;
+        const { error } = await supabase().rpc('donor_zeffy_fund', { p_donor_id: g.donor_id, p_fund_id: pick[g.id] || g.fund_id });
+        if (error) return { error };
+        kept.add(g.donor_id);
+      }
+      for (const g of gifts) {
+        if (g.donor_id && kept.has(g.donor_id)) continue;
         const { error } = await supabase().rpc('gift_assign_fund', { p_id: g.id, p_fund_id: pick[g.id] || g.fund_id });
         if (error) return { error };
       }
@@ -161,6 +171,11 @@ function UnassignedModal() {
                       <select className="in" style={{ width: 230 }} value={pick[g.id] || ''} onChange={(e) => setPick((p) => ({ ...p, [g.id]: e.target.value }))}>
                         {funds.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
                       </select>
+                      {g.recurring && !g.fund_raw ? (
+                        <label className="muted" style={{ display: 'block', fontSize: 12, marginTop: 4 }} title="Every later monthly gift from this donor with a blank Fund goes to this fund, until someone changes it on Donors">
+                          <input type="checkbox" checked={!!keep[g.id]} onChange={(e) => setKeep((k) => ({ ...k, [g.id]: e.target.checked }))} /> Keep this donor&apos;s monthly gifts here
+                        </label>
+                      ) : null}
                     </td>
                   </tr>
                 );
@@ -169,7 +184,7 @@ function UnassignedModal() {
           </table>
         </div>
       ) : <div className="full empty">Every Zeffy gift is assigned to a fund.</div>}
-      <div className="full muted">Saving confirms each gift in the fund shown.</div>
+      <div className="full muted">Saving confirms each gift in the fund shown. A monthly gift marked to keep sets that donor&apos;s standing fund: their later monthly gifts land there by themselves.</div>
     </Modal>
   );
 }

@@ -32,6 +32,8 @@ export const DONOR_TYPES = ['Individual', 'Family Foundation', 'Corporate Sponso
 export type Donor = Base & {
   name: string; type: (typeof DONOR_TYPES)[number]; giving: string | null; channel: string | null; anonymous: boolean; public: boolean;
   since: string | null; grant_id: string | null; notes: string | null; email: string | null;
+  /** The team fund this donor's monthly Zeffy gifts go to when Zeffy's Fund is blank (0018; set through donor_zeffy_fund). */
+  zeffy_fund_id?: string | null;
 };
 export type Donation = Base & {
   donor_id: string; date: string; amount: number; fund_id: string; channel: string | null; recurring: boolean; grant_id: string | null; thanked: boolean;
@@ -90,6 +92,8 @@ export type Ledger = Base & {
   receipt: boolean; receipt_path: string | null; receipt_name: string | null; pay_method: string | null; pay_ref: string | null;
   /** A reversal points at the entry it undoes; the undone entry points back at its reversal. */
   reverses_id: string | null; reversed_by_id: string | null; reason: string | null;
+  /** An equipment purchase the books keep as an asset (0018; set only through ledger_set_asset). */
+  asset?: boolean;
 };
 export type Receipt = Base & {
   request_id: string; vendor: string | null; amount: number; date: string; file_name: string | null; file_path: string | null; uploaded_by: string | null;

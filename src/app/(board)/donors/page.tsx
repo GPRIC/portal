@@ -103,6 +103,14 @@ function DonorForm({ id }: { id: string }) {
       <Kv k="Method"><Select value={f.channel} onChange={(v) => set({ channel: v })} options={Array.from(new Set([...CHANNELS, f.channel])).map((g) => [g, g])} /></Kv>
       <Kv k="Donor Since"><DateIn value={f.since} onChange={(v) => set({ since: v })} /></Kv>
       <Kv k="This Year">{money(t.total) + ' in ' + t.count + ' gifts'}</Kv>
+      {d.channel === 'Zeffy' || d.giving === 'Monthly' ? (
+        <Kv k="Monthly Gifts Go To">
+          <Select value={d.zeffy_fund_id || ''} blank="Unassigned Gifts (pick each time)"
+            onChange={(v) => { run(() => rpc('donor_zeffy_fund', { p_donor_id: d.id, p_fund_id: v || null }), v ? 'Monthly gifts now go to ' + calc.fundName(v) : 'Monthly gifts wait in Unassigned Gifts'); }}
+            options={db.funds.map((x) => [x.id, x.name] as [string, string])} />
+          <div className="muted" style={{ fontSize: 12 }}>A monthly Zeffy gift with a blank Fund lands here by itself, until this is changed. Saves at once.</div>
+        </Kv>
+      ) : null}
       <Kv k="Anonymous"><Check checked={f.anonymous} onChange={(v) => set({ anonymous: v })}>Hide name everywhere outside the board</Check></Kv>
       <Kv k="Public Listing"><Check checked={f.public} onChange={(v) => set({ public: v })}>Donor agreed to be named on the public site</Check></Kv>
       {f.type === 'Grantmaker' ? <Kv k="Grant"><Select value={f.grant_id} onChange={(v) => set({ grant_id: v })} blank="None" options={db.grants.map((g) => [g.id, g.funder + ' · ' + g.program])} /></Kv> : null}
