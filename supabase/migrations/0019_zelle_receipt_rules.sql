@@ -118,7 +118,9 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
-declare r public.team_requests%rowtype;
+declare
+  r public.team_requests%rowtype;
+  v_member text := public.my_member_id();
 begin
   perform public.require_role(array['treasurer','board'], 'Paying a reimbursement before its receipt');
   if nullif(trim(p_reason), '') is null then raise exception 'Give the reason the receipt can wait'; end if;
@@ -126,7 +128,9 @@ begin
   if r.id is null or r.archived_at is not null then raise exception 'Request not found'; end if;
   if r.type <> 'Reimbursement' then raise exception 'Only a reimbursement waits for its receipt'; end if;
   if r.status not in ('Submitted', 'Board Vote', 'Approved') then raise exception 'This request is not waiting to be paid'; end if;
-  if r.submitted_by_user = auth.uid() or lower(coalesce(r.requestor_email, '')) = lower(coalesce(auth.jwt() ->> 'email', '-')) then
+  -- the same three ways approve_request knows the person who filed it
+  if r.submitted_by_user = auth.uid() or (v_member is not null and r.requestor_member_id = v_member)
+     or lower(coalesce(r.requestor_email, '')) = lower(coalesce(auth.jwt() ->> 'email', '-')) then
     raise exception 'You made this request, so another board member has to override the receipt rule';
   end if;
   perform public.via('override');

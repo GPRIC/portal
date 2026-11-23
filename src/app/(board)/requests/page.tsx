@@ -637,7 +637,9 @@ function PayForm({ id }: { id: string }) {
       .then(({ data }) => setOverridden(!!data?.length));
   }, [id, missing]);
   if (!r) return <Modal title="Record Payment"><div className="full empty">This request was archived.</div></Modal>;
-  const filedByMe = r.submitted_by_user === user.id || (!!user.email && (r.requestor_email || '').toLowerCase() === user.email.toLowerCase());
+  const myEmail = (user.email || '').toLowerCase();
+  const filedByMe = r.submitted_by_user === user.id || (!!myEmail && (r.requestor_email || '').toLowerCase() === myEmail)
+    || (!!myEmail && (calc.requestorMember(r)?.email || '').toLowerCase() === myEmail);
   const canOverride = (role === 'treasurer' || role === 'board') && !filedByMe;
   const receiptBlock = missing && overridden === false;
   const overrideReceipt = async () => {
