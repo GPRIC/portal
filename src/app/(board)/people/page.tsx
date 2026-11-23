@@ -216,7 +216,7 @@ function PersonForm({ p, onDone }: { p: Person; onDone: () => void }) {
       </span>
     </>}>
       <Kv k="Email">{p.email}
-        {p.has_login && !off ? <> <button type="button" className="doclink" onClick={() => ui.open(p.is_me ? <ChangeOwnEmail current={p.email} /> : <ChangePersonEmail who={who} current={p.email} onDone={onDone} />)}>Change Email</button></> : null}</Kv>
+        {p.has_login && !off && (p.is_me || p.role === 'cpa') ? <> <button type="button" className="doclink" onClick={() => ui.open(p.is_me ? <ChangeOwnEmail current={p.email} /> : <ChangePersonEmail who={who} current={p.email} onDone={onDone} />)}>Change Email</button></> : null}</Kv>
       <Kv k="Status"><Badge tone={tone}>{label}</Badge>
         {p.status === 'off' && p.off_reason ? <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>Turned off {date(p.off_at)}{p.off_by ? ' by ' + p.off_by : ''}: {p.off_reason}</div> : null}
         {p.send_error && p.status !== 'off' ? <div className="warn" style={{ marginTop: 6 }}>The last invite email did not go out: {p.send_error}. The portal&apos;s email sender is limited to a few emails an hour; try Resend Invite later.</div> : null}

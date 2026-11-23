@@ -25,6 +25,11 @@ export async function POST(req: Request) {
   const admin = adminSupabase();
   if (!admin) return NextResponse.json({ error: 'Sign-up needs the Supabase service key set on the server (SUPABASE_SERVICE_ROLE_KEY).' }, { status: 503 });
 
+  // A brake on floods: a handful of real sign-ups a day is normal, so more than 10 in an hour waits.
+  const since = new Date(Date.now() - 3600_000).toISOString();
+  const recent = await admin.from('access_requests').select('id', { count: 'exact', head: true }).gte('created_at', since);
+  if ((recent.count ?? 0) >= 10) return NextResponse.json({ error: 'Too many sign-ups in the last hour. Try again in an hour.' }, { status: 429 });
+
   const made = await admin.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { full_name: name } });
   if (made.error || !made.data.user) {
     const msg = made.error?.message || 'unknown error';

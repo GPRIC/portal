@@ -34,12 +34,17 @@ const T = who(TREAS, 'treasurer@example.org'), B = who(BOARD, 'board@example.org
 const svc = { role: 'service_role' };
 
 await fails(B, `select public.people_email_change_request('board@example.org', 'new@example.org')`, [], /not allowed for your role/, 'a board member cannot change someone else\'s email');
+await fails(T, `select public.people_email_change_request('board@example.org', 'first@example.org')`, [], /changes its own email/, 'a board seat is never moved by the Treasurer');
+// the rest runs on a seat that cannot approve or pay (the CPA)
+await db.exec(`update public.portal_access set role = 'cpa' where user_id = '${BOARD}'`);
 await fails(T, `select public.people_email_change_request('board@example.org', 'coach@example.org')`, [], /Another login/, 'an address another login uses is refused');
 await fails(T, `select public.people_email_change_request('nobody@example.org', 'x@example.org')`, [], /not signed up/, 'someone with no login is refused');
 await as(T, `select public.people_email_change_request('board@example.org', 'first@example.org')`);
 await as(T, `select public.people_email_change_request('board@example.org', 'Director.New@example.org')`);
 ok((await q(`select email from auth.users where id = $1`, [BOARD]))[0].email === 'board@example.org', 'nothing changes before the new address confirms');
-const ob = await q(`select to_emails, link from public.email_outbox where kind = 'email_change' order by id`);
+const obAll = await q(`select to_emails, link from public.email_outbox where kind = 'email_change' order by id`);
+const ob = obAll.filter((r) => r.link !== '/login');
+ok(obAll.filter((r) => r.link === '/login' && r.to_emails[0] === 'board@example.org').length === 2, 'the old address is told each time');
 ok(ob.length === 2 && ob[1].to_emails[0] === 'director.new@example.org' && /^\/confirm-email\?token=[0-9a-f]{64}$/.test(ob[1].link), 'the confirmation link is emailed to the new address');
 const list = await one(T, `select public.people_email_changes()`);
 ok(list.length === 1 && list[0].new_email === 'director.new@example.org' && !JSON.stringify(list).includes(ob[1].link.split('=')[1]), 'People lists the waiting change, without its link');
@@ -54,7 +59,7 @@ await db.exec(`update auth.users set email = 'director.new@example.org' where id
 ok((await q(`select email, role from public.portal_access where user_id = $1`, [BOARD]))[0].email === 'director.new@example.org', 'the seat takes the new email, role kept');
 ok((await q(`select email from public.board_members where name = 'Sample Director'`))[0].email === 'director.new@example.org', 'the board member record follows');
 const B2 = who(BOARD, 'director.new@example.org');
-ok((await one(B2, `select public.my_role()`)) === 'board' && (await one(B2, `select public.my_member_id()`)) != null, 'they sign in with the new email as the same board member');
+ok((await one(B2, `select public.my_role()`)) === 'cpa' && (await one(B2, `select public.my_member_id()`)) != null, 'they sign in with the new email, same seat and member record');
 ok((await q(`select count(*)::int n from public.change_log where tbl = 'portal_access' and action <> 'Added' and record_id is not null and before::text like '%board@example.org%'`))[0].n >= 1, 'History shows the change');
 // a self change (Supabase's own flow) of a team login
 await db.exec(`update auth.users set email = 'coach2@example.org' where id = '${COACH}'`);

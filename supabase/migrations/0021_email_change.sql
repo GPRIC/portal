@@ -45,13 +45,18 @@ declare
   v_uid uuid;
   v_old text;
   v_name text;
+  v_role text;
 begin
   perform public.require_role(array['treasurer'], 'Changing a person''s sign-in email');
   if v_new is null or v_new !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then raise exception 'Enter the new email address'; end if;
-  select a.user_id, u.email, a.name into v_uid, v_old, v_name
+  select a.user_id, u.email, a.name, a.role into v_uid, v_old, v_name, v_role
     from public.portal_access a join auth.users u on u.id = a.user_id
    where lower(a.email) = lower(trim(p_email)) limit 1;
   if v_uid is null then raise exception 'That person has not signed up yet. Add them again with the new address instead.'; end if;
+  -- A seat that approves or pays moves only by its own hand (My Account), so no one can take over a second approver.
+  if v_role in ('treasurer','board','bookkeeper') then
+    raise exception 'A Treasurer, board or bookkeeper seat changes its own email from My Account' using errcode = '42501';
+  end if;
   if lower(v_old) = v_new then raise exception 'That is already their email'; end if;
   if exists (select 1 from auth.users u where lower(u.email) = v_new) then raise exception 'Another login already uses that email'; end if;
   perform public.via('email');
@@ -63,6 +68,11 @@ begin
       || coalesce(public.my_name(), 'The Treasurer') || ' is moving your GPRIC Portal sign-in from ' || v_old || ' to this address.' || chr(10)
       || 'Open the link below to confirm. Nothing changes until you do; your role and history stay as they are.',
     '/confirm-email?token=' || (select c.token from public.email_changes c where c.user_id = v_uid and c.confirmed_at is null and c.archived_at is null order by c.id desc limit 1));
+  -- The old address is told too, so a change nobody asked for is seen.
+  perform public.access_email('email_change', array[v_old], 'Your GPRIC Portal sign-in email is being changed',
+    'Hi ' || coalesce(v_name, 'there') || ',' || chr(10) || chr(10)
+      || coalesce(public.my_name(), 'The Treasurer') || ' asked to move your GPRIC Portal sign-in from this address to ' || v_new || '.' || chr(10)
+      || 'If you did not expect this, tell a board member right away.', '/login');
 end;
 $$;
 revoke all on function public.people_email_change_request(text, text) from public, anon;

@@ -551,3 +551,5 @@ create policy seatless_no_reports on public.problem_reports as restrictive for i
   with check ((select public.has_seat()));
 create policy seatless_no_files on storage.objects as restrictive for all to authenticated
   using ((select public.has_seat())) with check ((select public.has_seat()));
+create policy seatless_no_tips on public.seen_tips as restrictive for all to authenticated
+  using ((select public.has_seat())) with check ((select public.has_seat()));

@@ -2,7 +2,8 @@
 // P34: changing a sign-in email.
 //   ChangeOwnEmail: anyone, for themselves (My Account on the board, Profile in the Team Portal). Supabase sends the
 //   new address a confirmation link; nothing changes until it is opened. The seat follows by itself (0021).
-//   ChangePersonEmail: the Treasurer, for someone on People. The new address gets the portal's own confirmation link.
+//   ChangePersonEmail: the Treasurer, for the CPA's seat on People (a seat that approves or pays changes its own). The
+//   new address gets the portal's own confirmation link and the old address is told.
 import { useState } from 'react';
 import { Err, Txt } from '@/components/forms';
 import { Kv, Modal, useUI } from '@/components/ui';
