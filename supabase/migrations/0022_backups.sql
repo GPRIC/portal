@@ -21,7 +21,8 @@ alter table public.backup_runs enable row level security;
 revoke all on public.backup_runs from public, anon, authenticated;
 create trigger backup_runs_no_delete before delete on public.backup_runs for each row execute function public.no_delete_guard();
 create trigger backup_runs_cpa_read_only before insert or update or delete on public.backup_runs for each statement execute function public.cpa_read_only();
-create trigger backup_runs_cpa_no_truncate before truncate on public.backup_runs for each statement execute function public.cpa_read_only();
+-- the CPA cannot empty it either (written as 0020 writes its triggers)
+do $$ begin execute format('create trigger %I before truncate on public.%I for each statement execute function public.cpa_read_only()', 'backup_runs_cpa_no_truncate', 'backup_runs'); end $$;
 
 alter table public.email_outbox drop constraint email_outbox_kind_check;
 alter table public.email_outbox add constraint email_outbox_kind_check

@@ -27,7 +27,8 @@ revoke all on public.email_changes from public, anon, authenticated;
 create trigger email_changes_no_delete before delete on public.email_changes for each row execute function public.no_delete_guard();
 create trigger email_changes_log after insert or update or delete on public.email_changes for each row execute function public.log_change();
 create trigger email_changes_cpa_read_only before insert or update or delete on public.email_changes for each statement execute function public.cpa_read_only();
-create trigger email_changes_cpa_no_truncate before truncate on public.email_changes for each statement execute function public.cpa_read_only();
+-- the CPA cannot empty it either (written as 0020 writes its triggers)
+do $$ begin execute format('create trigger %I before truncate on public.%I for each statement execute function public.cpa_read_only()', 'email_changes_cpa_no_truncate', 'email_changes'); end $$;
 
 alter table public.email_outbox drop constraint email_outbox_kind_check;
 alter table public.email_outbox add constraint email_outbox_kind_check
