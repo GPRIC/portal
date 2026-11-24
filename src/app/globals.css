@@ -176,6 +176,9 @@ textarea.in { min-height: 70px; resize: vertical; }
 .auth label { display: grid; gap: 4px; color: var(--t3); font-size: 12px; }
 .auth .qr { background: #fff; padding: 10px; border-radius: 8px; width: 200px; height: 200px; margin: 6px auto; display: block; }
 .auth .secret { font-family: ui-monospace, Consolas, monospace; font-size: 12px; word-break: break-all; background: var(--inset); padding: 8px; border-radius: 6px; border: 1px solid var(--b); }
+.auth .note { background: rgba(var(--g-rgb), .1); border: 1px solid rgba(var(--g-rgb), .3); color: var(--g); border-radius: 8px; padding: 7px 10px; font-size: 12px; margin-bottom: 8px; }
+.auth .kvs { display: grid; gap: 6px; margin: 12px 0; font-size: 13px; }
+.auth .kvs .muted { display: inline-block; min-width: 80px; font-size: 12px; }
 .authbrand { display: flex; align-items: center; gap: 6px; font-weight: 700; margin-bottom: 14px; }
 .authbrand .dotb { width: 10px; height: 10px; border-radius: 3px; background: var(--g); }
 

@@ -45,13 +45,14 @@ function Login() {
   const shown = err || q.get('error');
   return (
     <AuthCard title="Sign In">
-      <p>For GPRIC board members. Access is by invitation only.</p>
+      <p>For GPRIC board members, staff and team members.</p>
       <form onSubmit={submit}>
         <label>Email<input className="in" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>
         <label>Password<input className="in" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
         {shown ? <div className="err">{shown}</div> : null}
         <button className="btn pri" type="submit" disabled={busy}>{busy ? 'Signing In…' : 'Sign In'}</button>
         <Link className="doclink" href="/login/forgot">Forgot your password?</Link>
+        <Link className="doclink" href="/request-access">New Here? Request Access</Link>
       </form>
     </AuthCard>
   );

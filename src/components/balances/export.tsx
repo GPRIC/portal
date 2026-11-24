@@ -8,6 +8,7 @@ import { Calc } from '@/lib/calc';
 import { date } from '@/lib/format';
 import { recentQuarters, type Quarter } from '@/lib/bank';
 import type { Db } from '@/lib/types';
+import { fiscalYear, statementRows } from '@/lib/statements';
 import { download } from './hint';
 
 type Sheet = 'ledger' | 'donations' | 'donors' | 'grants' | 'team_requests' | 'receipts' | 'request_approvals' | 'bank_statements' | 'bank_lines' | 'teams' | 'funds';
@@ -52,6 +53,21 @@ async function buildWorkbook(db: Db, q: Quarter, today: string): Promise<ArrayBu
   g.awarded.filter((x) => x.received < x.awarded).forEach((x) => tb.addRow([`Awarded, not received (not cash): ${x.funder}`, null, null, null, null, null, null, x.awarded - x.received]));
   tb.columns = [{ width: 44 }, ...Array.from({ length: 7 }, () => ({ width: 16, style: { numFmt: '#,##0.00' } }))];
 
+  // Year-end statements: the fiscal year the quarter ends in, from its start to the quarter end (the full year once
+  // the quarter closes it), the assets register and the tax-return line for each ledger source and category.
+  const fy = fiscalYear(db, asOf);
+  const st = statementRows(db, fy.start, asOf, asOf === fy.end ? `${fy.label} (year end)` : `${fy.label}, year to date`);
+  const addRows = (title: string, rows: (string | number | null)[][], widths: number[]) => {
+    const ws = wb.addWorksheet(title);
+    rows.forEach((r) => ws.addRow(r));
+    ws.getRow(1).font = { bold: true };
+    ws.columns = widths.map((w) => ({ width: w }));
+  };
+  addRows('Statement of Activities', st.activity, [44, 14, 58, 50]);
+  addRows('Financial Position', st.position, [58, 14]);
+  addRows('Assets', st.assets, [12, 10, 28, 36, 24, 16, 12]);
+  addRows('Tax Return Lines', st.tax, [22, 20, 58, 50, 16]);
+
   for (const name of SHEETS) {
     const all = db[name] as unknown as Record<string, unknown>[];
     const f = DATED[name];
@@ -91,7 +107,7 @@ export function ExportModal() {
     <Modal view title="Quarterly Export" wide foot={<><button className="btn" onClick={ui.close}>Cancel</button><button className="btn pri" onClick={go} disabled={busy}>{busy ? 'Building…' : 'Export'}</button></>}>
       <Kv k="Quarter"><Seg value={pick} onChange={setPick} options={qs.map((x, i) => [`${x.year}-${x.q}`, i === 0 && x.end >= calc.today ? `Q${x.q} ${x.year} · To Date` : x.label] as [string, string])} /></Kv>
       <Kv k="Format">Excel (.xlsx)</Kv>
-      <Kv k="Includes">Team Balances at the quarter end, then one sheet per table: ledger, donations, donors, grants, team requests, receipts, approvals, bank statements, bank lines, teams and funds.</Kv>
+      <Kv k="Includes">Team Balances at the quarter end; the year-end statements (Statement of Activities and Financial Position for the fiscal year to the quarter end), the Assets list and the tax-return line of each category; then one sheet per table: ledger, donations, donors, grants, team requests, receipts, approvals, bank statements, bank lines, teams and funds.</Kv>
       <div className="full muted">Dated records are limited to the quarter; donors, grants, teams and funds are included in full.</div>
     </Modal>
   );

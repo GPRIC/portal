@@ -9,6 +9,7 @@ import { flushAlerts } from '@/lib/alerts';
 import { money } from '@/lib/format';
 import { PAY_TO, REQUEST_CATEGORIES } from '@/lib/types';
 import { friendly, useTeam, type Portal, type TeamReq } from './team-data';
+import { ChangeOwnEmail } from '@/components/change-email';
 
 export type ReqType = TeamReq['type'];
 export const RECEIPT_RULE = 'One itemized receipt showing every item and proof of payment. Bank or card statements are not accepted.';
@@ -217,12 +218,18 @@ export function ProfileForm() {
       </span>
     </>}>
       <Kv k="Team">{p.team.name}</Kv>
-      <Kv k="Email">{p.me.email}</Kv>
+      <Kv k="Email">{p.me.email} <button type="button" className="doclink" onClick={() => ui.open(<ChangeOwnEmail current={p.me.email} />)}>Change Email</button></Kv>
       <Kv k="Role">{p.me.role}</Kv>
       <Kv k="Name"><Txt value={name} onChange={setName} /></Kv>
-      <KvI k="Zelle Contact" tip="The phone number or email your Zelle account uses. Reimbursements are paid here.">
-        <Txt value={zelle} onChange={setZelle} placeholder="Phone or email" />
-      </KvI>
+      {p.me.zelle_contact ? (
+        <KvI k="Zelle Contact" tip="Reimbursements are paid here. It is locked once on record; the Treasurer or a board member changes it.">
+          {p.me.zelle_contact}
+        </KvI>
+      ) : (
+        <KvI k="Zelle Contact" tip="The phone number or email your Zelle account uses. Reimbursements are paid here. Once saved, only the Treasurer or a board member can change it.">
+          <Txt value={zelle} onChange={setZelle} placeholder="Phone or email" />
+        </KvI>
+      )}
       <Err msg={err} />
     </Modal>
   );

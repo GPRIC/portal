@@ -108,6 +108,7 @@ await fails(B, `update public.receipts set amount = 1 where id = '${(await live(
 
 // approved: the total is fixed
 await as(T, `select public.approve_request($1)`, [r1]);
+await as(B, `select public.approve_request($1)`, [r1]);   // a new Zelle takes two approvals (0019)
 ok((await req(r1)).status === 'Approved', 'approved');
 await fails(C, `select public.add_team_receipt($1, 'x', 1, null, 'p.pdf', 'team/T-9255/p.pdf')`, [r1], /not approved yet|only to your team/, 'team cannot add after approval');
 await fails(B, `select public.add_request_receipt($1, 'x', 1, null, null, null, null)`, [r1], /receipts and total are fixed/, 'board cannot add after approval');
@@ -136,6 +137,7 @@ ok(num((await req(r2)).amount) === 30 && (await live(r2)).length === 2, 'rolling
 const arch = await logId('receipts', added, 'Archived');
 await fails(T, `select public.rollback_change($1, 'test')`, [arch], /Change a receipt from its request/, 'an archived receipt is not put back by roll back');
 await as(T, `select public.approve_request($1)`, [r2]);
+await as(B, `select public.approve_request($1)`, [r2]);   // first payment to this Zelle: two approvals (0019)
 await as(K, `select public.mark_request_paid($1, '2026-10-26', 'Zelle', 'Z3')`, [r2]);
 await as(B, `select public.request_refund($1, 10, '2026-10-27', 'Returned', 'Wrong part')`, [r2]);
 await fails(T, `select public.rollback_change($1, 'test')`, [await logId('team_requests', r2, 'Paid')], /refund recorded/, 'a refunded payment is not rolled back');
@@ -205,6 +207,12 @@ ok((await q(`select file_path from public.receipts where id = $1`, [nf]))[0].fil
 // a reimbursement the board entered (request_save keeps one file on the request, no receipt rows) and paid without its file
 const legacy = await one(B, `select public.request_save($1)`, [JSON.stringify({ team_id: 'T-9255', type: 'Reimbursement', purpose: 'Legacy', amount: 11, vendor: 'Shop', zelle_contact: 'z', requestor_name: 'Sample Coach', requestor_email: 'coach@example.org' })]);
 await as(T, `select public.approve_request($1)`, [legacy]);
+// 0019: a reimbursement with no receipt is paid only after a board member overrides the rule, with a reason
+await fails(K, `select public.mark_request_paid($1, '2026-10-26', 'Zelle', 'Z9')`, [legacy], /paid once its receipt is attached/, 'a reimbursement with no receipt is not paid');
+await fails(K, `select public.request_receipt_override($1, 'Coach is travelling')`, [legacy], /not allowed for your role/, 'the bookkeeper cannot override the receipt rule');
+await fails(T, `select public.request_receipt_override($1, ' ')`, [legacy], /reason/, 'the override needs a reason');
+await as(T, `select public.request_receipt_override($1, 'Coach is travelling')`, [legacy]);
+ok((await q(`select count(*)::int n from public.change_log where tbl = 'money_overrides' and action = 'Overrode' and after ->> 'record_id' = $1`, [legacy]))[0].n >= 1, 'the receipt override is in History');
 await as(K, `select public.mark_request_paid($1, '2026-10-26', 'Zelle', 'Z9')`, [legacy]);
 ok((await portalReq(C, legacy)).missing === true, 'a paid reimbursement with no receipt at all is missing');
 await as(B, `select public.add_request_receipt($1, 'Shop', 11, null, 's.pdf', 'team/T-9255/s.pdf', null)`, [legacy]);

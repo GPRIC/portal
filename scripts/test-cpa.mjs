@@ -28,7 +28,7 @@ async function err(claims, sql, params = []) {
 const rows = async (claims, sql, params = []) => (await as(claims, sql, params)).rows;
 const one = async (claims, sql, params = []) => Object.values((await as(claims, sql, params)).rows[0])[0];
 const q = async (sql, params = []) => (await db.query(sql, params)).rows;
-const REFUSED = /not allowed for your role|two-step is required|read only|permission denied|row-level security|Team sign-in/i;
+const REFUSED = /not allowed for your role|two-step is required|read only|permission denied|row-level security|Team sign-in|already has portal access/i;
 
 // ---------------------------------------------------------------- people and a little of everything (sample)
 
@@ -197,7 +197,9 @@ const READS = new Set(['my_role', 'is_board', 'is_treasurer', 'is_cpa', 'is_cpa_
   // History's pure text helpers (immutable or stable, security invoker): they format, they never read or write a table
   'log_action', 'log_area', 'log_money', 'log_summary', 'log_team_mask', 'log_team_mask_text',
   // the CPA's contact masks (immutable, no table)
-  'cpa_contact_col', 'cpa_mask_text', 'cpa_mask_json']);
+  'cpa_contact_col', 'cpa_mask_text', 'cpa_mask_json',
+  // the sign-up page (0020): team names, an invite's sender, the caller's own request; none reads the books
+  'access_invite_lookup', 'access_team_choices', 'access_request_mine', 'has_seat']);
 const fns = await q(`select p.oid::regprocedure::text sig, p.proname, p.pronargs, p.provolatile,
                             array(select format_type(t, null) from unnest(p.proargtypes) t) args
                        from pg_proc p join pg_namespace n on n.oid = p.pronamespace

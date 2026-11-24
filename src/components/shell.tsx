@@ -14,6 +14,7 @@ import { ROLE_LABEL } from '@/lib/types';
 import { Modal, UIHost, UIProvider, useReadOnly, useUI } from './ui';
 import { TipsProvider } from './tips';
 import { Icon, ReportProblem } from './problems/report-problem';
+import { ChangeOwnEmail } from './change-email';
 
 /** Pages the CPA does not see (P35): the calendar is the board's and the teams', not the books. */
 export const NOT_FOR_CPA = ['/calendar'];
@@ -82,6 +83,7 @@ function TopBar() {
   const path = usePathname();
   const router = useRouter();
   const { me, user, role, isTreasurer, readOnly } = useData();
+  const ui = useUI();
   const signOut = async () => { await supabase().auth.signOut(); router.replace('/login'); router.refresh(); };
   return (
     <header className="top">
@@ -92,7 +94,7 @@ function TopBar() {
         {/* P37: Problem Reports is the Treasurer's only (row security too) */}
         {isTreasurer ? <Link href="/problems" className={'lockd' + (path === '/problems' ? ' on' : '')} title="Only you see this page in the menu"><Icon.lock />Problem Reports</Link> : null}
         {/* P39: People (who can sign in, and as what) is the Treasurer's only (the database checks too) */}
-        {isTreasurer ? <Link href="/people" className={'lockd' + (path === '/people' ? ' on' : '')} title="Only you see this page in the menu"><Icon.lock />People</Link> : null}
+        {isTreasurer || role === 'board' ? <Link href="/people" className={'lockd' + (path === '/people' ? ' on' : '')} title={isTreasurer ? 'Only you and board members see this page in the menu' : 'Access requests and sign-up invites'}><Icon.lock />People</Link> : null}
       </nav>
       {/* The CPA files nothing, problem reports included (0012_cpa.sql) */}
       {readOnly ? <span className="chip ro" title="The CPA login reads the books and exports them. It cannot add, change or upload anything.">Read only (CPA)</span>
@@ -100,7 +102,9 @@ function TopBar() {
       <span className="chip who" tabIndex={0}>
         <span className="av grn">{initials(me)}</span><span className="who-name">{me}</span>
         {role ? <span className="muted who-role">{ROLE_LABEL[role]}</span> : null}
-        <span className="pop r">Signed in as {user.email}{role ? ' · ' + ROLE_LABEL[role] : ''}. Two-step sign-in is on.</span>
+        <span className="pop r">Signed in as {user.email}{role ? ' · ' + ROLE_LABEL[role] : ''}. Two-step sign-in is on.
+          {/* P34: My Account */}
+          <button type="button" className="doclink" style={{ display: 'block', marginTop: 6 }} onClick={() => ui.open(<ChangeOwnEmail current={user.email} />)}>Change My Email</button></span>
       </span>
       <ThemeToggle />
       <button className="btn sm" onClick={signOut}>Sign Out</button>

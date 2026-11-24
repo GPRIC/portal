@@ -176,6 +176,14 @@ function EntryForm({ id, dir }: { id?: string; dir: 'in' | 'out' }) {
       <Kv k="Date"><DateIn value={f.date} onChange={(v) => set({ date: v })} /></Kv>
       <Kv k="Fund"><FundSelect value={fundId} onChange={(v) => set({ fund_id: v })} balances /></Kv>
       {dir === 'out' ? <Kv k="Category"><Seg value={f.category as (typeof CATEGORIES)[number]} options={[...CATEGORIES]} onChange={(v) => set({ category: v })} /></Kv> : null}
+      {old && old.dir === 'out' ? (
+        <Kv k="Asset">
+          <Check checked={!!old.asset} onChange={(v) => { run(() => rpc('ledger_set_asset', { p_id: old.id, p_asset: v }), v ? 'Marked as an asset' : 'No longer an asset'); }}>
+            Equipment the books keep as an asset
+          </Check>
+          <div className="muted" style={{ fontSize: 12 }}>Listed on the Assets sheet of the Quarterly and Year exports. Saves at once; money is unchanged.</div>
+        </Kv>
+      ) : null}
       {dir === 'in' && !linkedGift && !req ? (
         <Kv k="Source">
           {old && !(IN_SOURCES as readonly string[]).includes(f.source)
